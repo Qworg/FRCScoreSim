@@ -301,4 +301,44 @@ export class Field {
   getBallSpawnPoints(): Position[] {
     return this.config.ballSpawnPoints.map((sp) => sp.position);
   }
+
+  /**
+   * Check if a position is within or near a climbing zone for the specified alliance
+   */
+  isNearClimbingZone(pos: Position, alliance: 'red' | 'blue', proximityThreshold: number = 36): boolean {
+    // Find climbing zones for this alliance
+    for (const zone of this.config.zones) {
+      if (zone.type !== ZoneType.CLIMBING) continue;
+
+      // Check if this is the alliance's climbing zone
+      // Red climbing zone is on the left (low X), Blue is on the right (high X)
+      const isRedZone = zone.bounds.minX < this.config.width / 2;
+      const isAllianceZone = (alliance === 'red' && isRedZone) || (alliance === 'blue' && !isRedZone);
+
+      if (!isAllianceZone) continue;
+
+      // Check if position is within the zone or within proximity threshold
+      const inZoneX = pos.x >= zone.bounds.minX && pos.x <= zone.bounds.maxX;
+      const inZoneY = pos.y >= zone.bounds.minY && pos.y <= zone.bounds.maxY;
+
+      if (inZoneX && inZoneY) return true;
+
+      // Check proximity to zone bounds
+      const distToZone = this.distanceToZone(pos, zone.bounds);
+      if (distToZone <= proximityThreshold) return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Calculate minimum distance from a position to a zone's bounds
+   */
+  private distanceToZone(pos: Position, bounds: { minX: number; maxX: number; minY: number; maxY: number }): number {
+    const clampedX = Math.max(bounds.minX, Math.min(bounds.maxX, pos.x));
+    const clampedY = Math.max(bounds.minY, Math.min(bounds.maxY, pos.y));
+    const dx = pos.x - clampedX;
+    const dy = pos.y - clampedY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
 }

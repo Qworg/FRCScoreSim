@@ -34,6 +34,24 @@ export class ScorerStrategy extends BaseStrategy {
       !robot.hasAutoClimbed &&
       context.allianceCanAutoClimb
     ) {
+      // If already climbing, continue
+      if (robot.currentAction.type === RobotActionType.CLIMBING) {
+        return this.idle('Continuing auto climb');
+      }
+
+      // Must be near climbing zone to climb
+      if (!context.isNearClimbingZone && context.climbingZonePosition) {
+        if (robot.currentAction.type === RobotActionType.MOVING) {
+          return this.idle('Moving to climb zone');
+        }
+        return this.moveTo(
+          context.climbingZonePosition.x,
+          context.climbingZonePosition.y,
+          StrategyPriority.CRITICAL,
+          'Auto - moving to climb zone'
+        );
+      }
+
       // Shoot any remaining balls first (if we have them and in range)
       if (robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
         return this.shoot(
@@ -52,7 +70,25 @@ export class ScorerStrategy extends BaseStrategy {
       !robot.hasClimbed &&
       context.allianceCanEndgameClimb
     ) {
-      // Shoot any remaining balls first (if we can score)
+      // If already climbing, continue
+      if (robot.currentAction.type === RobotActionType.CLIMBING) {
+        return this.idle('Continuing endgame climb');
+      }
+
+      // Must be near climbing zone to climb
+      if (!context.isNearClimbingZone && context.climbingZonePosition) {
+        if (robot.currentAction.type === RobotActionType.MOVING) {
+          return this.idle('Moving to climb zone');
+        }
+        return this.moveTo(
+          context.climbingZonePosition.x,
+          context.climbingZonePosition.y,
+          StrategyPriority.CRITICAL,
+          'Endgame - moving to climb zone'
+        );
+      }
+
+      // Shoot any remaining balls first (if we can score and in range)
       if (canScore && robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
         return this.shoot(
           nearestScoringTarget.id,

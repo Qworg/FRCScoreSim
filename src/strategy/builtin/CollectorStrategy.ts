@@ -21,6 +21,24 @@ export class CollectorStrategy extends BaseStrategy {
       !robot.hasAutoClimbed &&
       context.allianceCanAutoClimb
     ) {
+      // If already climbing, continue
+      if (robot.currentAction.type === RobotActionType.CLIMBING) {
+        return this.idle('Continuing auto climb');
+      }
+
+      // Must be near climbing zone to climb
+      if (!context.isNearClimbingZone && context.climbingZonePosition) {
+        if (robot.currentAction.type === RobotActionType.MOVING) {
+          return this.idle('Moving to climb zone');
+        }
+        return this.moveTo(
+          context.climbingZonePosition.x,
+          context.climbingZonePosition.y,
+          StrategyPriority.HIGH,
+          'Auto - moving to climb zone'
+        );
+      }
+
       return this.autoClimb(StrategyPriority.HIGH, 'Auto - attempting to climb (15 pts)');
     }
 
@@ -31,6 +49,24 @@ export class CollectorStrategy extends BaseStrategy {
       !robot.hasClimbed &&
       context.allianceCanEndgameClimb
     ) {
+      // If already climbing, continue
+      if (robot.currentAction.type === RobotActionType.CLIMBING) {
+        return this.idle('Continuing endgame climb');
+      }
+
+      // Must be near climbing zone to climb
+      if (!context.isNearClimbingZone && context.climbingZonePosition) {
+        if (robot.currentAction.type === RobotActionType.MOVING) {
+          return this.idle('Moving to climb zone');
+        }
+        return this.moveTo(
+          context.climbingZonePosition.x,
+          context.climbingZonePosition.y,
+          StrategyPriority.HIGH,
+          'Endgame - moving to climb zone'
+        );
+      }
+
       const level = robot.config.climbLevel;
       return this.endgameClimb(
         level,

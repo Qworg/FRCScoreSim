@@ -65,10 +65,6 @@
       border: 2px solid #333;
       border-radius: 4px;
       background: #2d4a3e;
-      /* Scale up for better visibility - 1.5x the field dimensions */
-      width: 972px;
-      height: 486px;
-      image-rendering: pixelated;
     }
 
     .sidebar {
@@ -305,6 +301,13 @@
       border: 2px solid #888;
       border-radius: 50%;
     }
+
+    .legend-color.climb-bar {
+      background: linear-gradient(90deg, #ef4444 50%, #3b82f6 50%);
+      width: 24px;
+      height: 8px;
+      border-radius: 2px;
+    }
   </style>
 </head>
 <body>
@@ -317,7 +320,7 @@
 
   <div class="game-container">
     <div class="field-container">
-      <canvas id="field" width="648" height="324"></canvas>
+      <canvas id="field" width="1296" height="648"></canvas>
       <div class="legend" style="margin-top: 10px;">
         <div class="legend-item">
           <div class="legend-color red-robot"></div>
@@ -334,6 +337,10 @@
         <div class="legend-item">
           <div class="legend-color goal"></div>
           <span>Goal</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color climb-bar"></div>
+          <span>Climb Bar</span>
         </div>
       </div>
     </div>
@@ -398,6 +405,7 @@
     // Configuration
     const WS_URL = 'ws://localhost:8080';
     const TICK_RATE = 60;
+    const SCALE = 2; // 2 pixels per inch
 
     // State
     let ws = null;
@@ -460,8 +468,8 @@
         case 'config':
           config = message.data;
           if (config && config.field) {
-            canvas.width = config.field.width;
-            canvas.height = config.field.height;
+            canvas.width = config.field.width * SCALE;
+            canvas.height = config.field.height * SCALE;
           }
           render();
           break;
@@ -559,7 +567,7 @@
     // Draw field markings
     function drawFieldMarkings() {
       ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 2;
 
       // Center line
       ctx.beginPath();
@@ -568,7 +576,7 @@
       ctx.stroke();
 
       // Auto line (approximately)
-      ctx.setLineDash([5, 5]);
+      ctx.setLineDash([10, 10]);
       ctx.beginPath();
       ctx.moveTo(canvas.width * 0.25, 0);
       ctx.lineTo(canvas.width * 0.25, canvas.height);
@@ -579,20 +587,141 @@
 
       // Field border
       ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
+
+      // Draw climb bars at center of horizontal ends
+      drawClimbBars();
+    }
+
+    // Draw climb bars (vertical, parallel to the vertical walls)
+    function drawClimbBars() {
+      const barWidth = 8 * SCALE;
+      const barHeight = 84 * SCALE; // 7 feet = 84 inches
+      const barOffset = 12 * SCALE; // Distance from field edge (centered in 24" zone)
+      const centerY = canvas.height / 2;
+
+      // Red alliance climb bar (left side, vertical)
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(barOffset - barWidth/2, centerY - barHeight/2, barWidth, barHeight);
+      ctx.strokeStyle = '#b91c1c';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(barOffset - barWidth/2, centerY - barHeight/2, barWidth, barHeight);
+
+      // Level indicators for red (horizontal, to the right of bar)
+      ctx.fillStyle = '#fff';
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('L3', barOffset + 20 * SCALE, centerY - 25 * SCALE + 5);
+      ctx.fillText('L2', barOffset + 20 * SCALE, centerY + 5);
+      ctx.fillText('L1', barOffset + 20 * SCALE, centerY + 25 * SCALE + 5);
+
+      // Horizontal level markers for red
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
       ctx.lineWidth = 2;
-      ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(barOffset + 6 * SCALE, centerY + i * 25 * SCALE);
+        ctx.lineTo(barOffset + 16 * SCALE, centerY + i * 25 * SCALE);
+        ctx.stroke();
+      }
+
+      // Blue alliance climb bar (right side, vertical)
+      const blueBarX = canvas.width - barOffset;
+      ctx.fillStyle = '#3b82f6';
+      ctx.fillRect(blueBarX - barWidth/2, centerY - barHeight/2, barWidth, barHeight);
+      ctx.strokeStyle = '#1d4ed8';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(blueBarX - barWidth/2, centerY - barHeight/2, barWidth, barHeight);
+
+      // Level indicators for blue (horizontal, to the left of bar)
+      ctx.fillStyle = '#fff';
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('L3', blueBarX - 20 * SCALE, centerY - 25 * SCALE + 5);
+      ctx.fillText('L2', blueBarX - 20 * SCALE, centerY + 5);
+      ctx.fillText('L1', blueBarX - 20 * SCALE, centerY + 25 * SCALE + 5);
+
+      // Horizontal level markers for blue
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.lineWidth = 2;
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(blueBarX - 6 * SCALE, centerY + i * 25 * SCALE);
+        ctx.lineTo(blueBarX - 16 * SCALE, centerY + i * 25 * SCALE);
+        ctx.stroke();
+      }
+
+      // Draw climbed robots on bars
+      if (gameState) {
+        drawClimbedRobots();
+      }
+    }
+
+    // Draw robots that have climbed on the bars (vertical orientation)
+    function drawClimbedRobots() {
+      const barOffset = 12 * SCALE;
+      const blueBarX = canvas.width - barOffset;
+      const centerY = canvas.height / 2;
+
+      // Track robots at each level for stacking
+      const redLevels = { 1: 0, 2: 0, 3: 0 };
+      const blueLevels = { 1: 0, 2: 0, 3: 0 };
+
+      for (const robot of gameState.robots) {
+        if (robot.hasClimbed || robot.hasAutoClimbed) {
+          const isRed = robot.alliance === 'red';
+          const barX = isRed ? barOffset : blueBarX;
+          const level = robot.currentClimbLevel || 1;
+
+          // Vertical offset based on level (L1 at bottom, L3 at top)
+          const levelOffset = (2 - level) * 25 * SCALE; // L1=+25, L2=0, L3=-25
+
+          // Track and offset for multiple robots at same level
+          const levels = isRed ? redLevels : blueLevels;
+          const stackOffset = levels[level] * 30 * SCALE;
+          levels[level]++;
+
+          // Position robots to the side of the bar
+          const xOffset = isRed ? 40 * SCALE + stackOffset : -40 * SCALE - stackOffset;
+          const x = barX + xOffset;
+          const y = centerY + levelOffset;
+
+          // Draw small robot indicator
+          const color = isRed ? '#ef4444' : '#3b82f6';
+          ctx.fillStyle = color;
+          ctx.fillRect(x - 12, y - 12, 24, 24);
+
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(robot.id.split('-')[1] || robot.id, x, y);
+
+          // Auto climb indicator (yellow dot)
+          if (robot.hasAutoClimbed && !robot.hasClimbed) {
+            ctx.fillStyle = '#fbbf24';
+            ctx.beginPath();
+            ctx.arc(x + 12, y - 12, 6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
     }
 
     // Draw scoring targets
     function drawScoringTargets() {
       for (const target of config.field.scoringTargets) {
         const color = target.alliance === 'red' ? '#ef4444' : '#3b82f6';
+        const x = target.position.x * SCALE;
+        const y = canvas.height - target.position.y * SCALE;
+        const radius = target.radius * SCALE;
 
         // Draw target circle
         ctx.beginPath();
-        ctx.arc(target.position.x, canvas.height - target.position.y, target.radius, 0, Math.PI * 2);
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 4;
         ctx.stroke();
 
         // Draw target fill (semi-transparent)
@@ -601,9 +730,9 @@
 
         // Draw target label
         ctx.fillStyle = color;
-        ctx.font = '10px sans-serif';
+        ctx.font = '16px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(target.name, target.position.x, canvas.height - target.position.y + target.radius + 12);
+        ctx.fillText(target.name, x, y + radius + 20);
       }
     }
 
@@ -612,14 +741,14 @@
       for (const ball of gameState.balls) {
         if (ball.state === 'HELD' || ball.state === 'SCORED') continue;
 
-        const x = ball.position.x;
-        const y = canvas.height - ball.position.y;
-        const radius = 4; // Smaller for better visibility with 360+ balls
+        const x = ball.position.x * SCALE;
+        const y = canvas.height - ball.position.y * SCALE;
+        const radius = 6; // Ball radius in pixels
 
         // Ball shadow (if in flight)
         if (ball.state === 'IN_FLIGHT') {
           ctx.beginPath();
-          ctx.arc(x, y + 5, radius * 0.8, 0, Math.PI * 2);
+          ctx.arc(x, y + 8, radius * 0.8, 0, Math.PI * 2);
           ctx.fillStyle = 'rgba(0,0,0,0.3)';
           ctx.fill();
         }
@@ -629,7 +758,7 @@
         ctx.arc(x, y, radius, 0, Math.PI * 2);
 
         // Gradient for 3D effect
-        const gradient = ctx.createRadialGradient(x - 2, y - 2, 0, x, y, radius);
+        const gradient = ctx.createRadialGradient(x - 3, y - 3, 0, x, y, radius);
         gradient.addColorStop(0, '#fde047');
         gradient.addColorStop(1, '#ca8a04');
         ctx.fillStyle = gradient;
@@ -645,10 +774,10 @@
     // Draw robots
     function drawRobots() {
       for (const robot of gameState.robots) {
-        const x = robot.position.x;
-        const y = canvas.height - robot.position.y;
-        const width = robot.config.width;
-        const length = robot.config.length;
+        const x = robot.position.x * SCALE;
+        const y = canvas.height - robot.position.y * SCALE;
+        const width = robot.config.width * SCALE;
+        const length = robot.config.length * SCALE;
         const heading = -robot.heading * Math.PI / 180; // Convert to radians, flip for canvas
 
         ctx.save();
@@ -661,7 +790,7 @@
 
         // Shadow
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
-        ctx.fillRect(-width/2 + 3, -length/2 + 3, width, length);
+        ctx.fillRect(-width/2 + 4, -length/2 + 4, width, length);
 
         // Main body
         ctx.fillStyle = color;
@@ -669,16 +798,16 @@
 
         // Direction indicator (front of robot)
         ctx.fillStyle = darkColor;
-        ctx.fillRect(-width/2, -length/2, width, 6);
+        ctx.fillRect(-width/2, -length/2, width, 10);
 
         // Robot outline
         ctx.strokeStyle = darkColor;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 3;
         ctx.strokeRect(-width/2, -length/2, width, length);
 
         // Robot ID
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 10px sans-serif';
+        ctx.font = 'bold 16px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(robot.id.split('-')[1] || robot.id, 0, 0);
@@ -687,18 +816,18 @@
         if (robot.heldBalls.length > 0) {
           ctx.fillStyle = '#fbbf24';
           ctx.beginPath();
-          ctx.arc(width/2 - 5, -length/2 + 5, 6, 0, Math.PI * 2);
+          ctx.arc(width/2 - 8, -length/2 + 8, 10, 0, Math.PI * 2);
           ctx.fill();
           ctx.fillStyle = '#000';
-          ctx.font = 'bold 8px sans-serif';
-          ctx.fillText(robot.heldBalls.length.toString(), width/2 - 5, -length/2 + 5);
+          ctx.font = 'bold 12px sans-serif';
+          ctx.fillText(robot.heldBalls.length.toString(), width/2 - 8, -length/2 + 8);
         }
 
         // Action indicator
         if (robot.currentAction.type !== 'IDLE') {
           ctx.fillStyle = 'rgba(255,255,255,0.8)';
-          ctx.font = '8px sans-serif';
-          ctx.fillText(robot.currentAction.type, 0, length/2 + 10);
+          ctx.font = '12px sans-serif';
+          ctx.fillText(robot.currentAction.type, 0, length/2 + 16);
         }
 
         ctx.restore();

@@ -70,6 +70,8 @@ export { StrategyManager, globalStrategyManager } from './strategy/StrategyManag
 export { IdleStrategy } from './strategy/builtin/IdleStrategy.js';
 export { CollectorStrategy } from './strategy/builtin/CollectorStrategy.js';
 export { ScorerStrategy } from './strategy/builtin/ScorerStrategy.js';
+export { AutoClimbStrategy } from './strategy/builtin/AutoClimbStrategy.js';
+export { EndgameClimberStrategy } from './strategy/builtin/EndgameClimberStrategy.js';
 
 // Visualization
 export { VisualizationServer } from './visualization/WebSocketServer.js';
@@ -103,6 +105,8 @@ import { SimulationEngine } from './simulation/SimulationEngine.js';
 import { IdleStrategy } from './strategy/builtin/IdleStrategy.js';
 import { CollectorStrategy } from './strategy/builtin/CollectorStrategy.js';
 import { ScorerStrategy } from './strategy/builtin/ScorerStrategy.js';
+import { AutoClimbStrategy } from './strategy/builtin/AutoClimbStrategy.js';
+import { EndgameClimberStrategy } from './strategy/builtin/EndgameClimberStrategy.js';
 import { VisualizationServer } from './visualization/WebSocketServer.js';
 
 /**
@@ -132,6 +136,8 @@ export async function createSimulation(
   engine.registerStrategy(new IdleStrategy());
   engine.registerStrategy(new CollectorStrategy());
   engine.registerStrategy(new ScorerStrategy());
+  engine.registerStrategy(new AutoClimbStrategy());
+  engine.registerStrategy(new EndgameClimberStrategy());
 
   return engine;
 }
@@ -209,17 +215,19 @@ export function createDemoSetup(): MatchSetup {
     height: 324,
     cellSize: 1,
     zones: [
-      // Red climbing apparatus at red end (x=0-42, 3.5' wide)
+      // Red climbing apparatus at red end - horizontal bar parallel to vertical wall
+      // 84" wide (7'), 24" deep, centered vertically at x=21 (touching left wall)
       {
         name: 'Red Climbing Apparatus',
         type: ZoneType.CLIMBING,
-        bounds: { minX: 0, maxX: 42, minY: 120, maxY: 204 }, // centered vertically
+        bounds: { minX: 0, maxX: 24, minY: 120, maxY: 204 }, // horizontal bar at left wall
       },
-      // Blue climbing apparatus at blue end (x=606-648, 3.5' wide)
+      // Blue climbing apparatus at blue end - horizontal bar parallel to vertical wall
+      // 84" wide (7'), 24" deep, centered vertically at x=627 (touching right wall)
       {
         name: 'Blue Climbing Apparatus',
         type: ZoneType.CLIMBING,
-        bounds: { minX: 606, maxX: 648, minY: 120, maxY: 204 }, // centered vertically
+        bounds: { minX: 624, maxX: 648, minY: 120, maxY: 204 }, // horizontal bar at right wall
       },
     ],
     ballSpawnPoints,
@@ -296,6 +304,8 @@ export async function runDemo(): Promise<MatchResult> {
   engine.registerStrategy(new IdleStrategy());
   engine.registerStrategy(new CollectorStrategy());
   engine.registerStrategy(new ScorerStrategy());
+  engine.registerStrategy(new AutoClimbStrategy());
+  engine.registerStrategy(new EndgameClimberStrategy());
 
   return engine.start();
 }

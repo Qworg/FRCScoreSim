@@ -30,6 +30,7 @@ export function createRobotState(
       progress: 0,
       startedAt: 0,
     },
+    secondaryAction: null,
     disabled: false,
     hasAutoClimbed: false,
     hasClimbed: false,
@@ -197,6 +198,55 @@ export class Robot {
   }
 
   /**
+   * Get the secondary action (pickup while shooting)
+   */
+  get secondaryAction(): RobotAction | null {
+    return this.state.secondaryAction;
+  }
+
+  /**
+   * Check if robot is currently shooting
+   */
+  isShooting(): boolean {
+    return this.state.currentAction.type === RobotActionType.SHOOTING;
+  }
+
+  /**
+   * Check if robot has a secondary action in progress
+   */
+  hasSecondaryAction(): boolean {
+    return this.state.secondaryAction !== null;
+  }
+
+  /**
+   * Start a secondary pickup action (while shooting)
+   */
+  startSecondaryPickup(ballId: string, tick: number): void {
+    this.state.secondaryAction = {
+      type: RobotActionType.PICKING_UP,
+      targetBallId: ballId,
+      progress: 0,
+      startedAt: tick,
+    };
+  }
+
+  /**
+   * Update secondary action progress
+   */
+  updateSecondaryProgress(progress: number): void {
+    if (this.state.secondaryAction) {
+      this.state.secondaryAction.progress = Math.min(1, progress);
+    }
+  }
+
+  /**
+   * Complete the secondary action
+   */
+  completeSecondaryAction(): void {
+    this.state.secondaryAction = null;
+  }
+
+  /**
    * Set position
    */
   setPosition(pos: Position): void {
@@ -332,6 +382,7 @@ export class Robot {
       position: { ...this.state.position },
       heldBalls: [...this.state.heldBalls],
       currentAction: { ...this.state.currentAction },
+      secondaryAction: this.state.secondaryAction ? { ...this.state.secondaryAction } : null,
       currentPath: this.state.currentPath.map((p) => ({ ...p })),
     };
   }

@@ -1,5 +1,5 @@
 import type { Ball } from './ball.js';
-import type { FieldConfig, ScoringTarget } from './field.js';
+import type { FieldConfig, Position, ScoringTarget } from './field.js';
 import type { GameState, MatchPhase, ShiftParity } from './game.js';
 import type { RobotCommand, RobotState } from './robot.js';
 
@@ -53,6 +53,10 @@ export interface StrategyContext {
   allianceAutoClimbCount: number;
   /** Number of alliance robots that have endgame-climbed */
   allianceEndgameClimbCount: number;
+  /** Whether robot is near its alliance's climbing zone */
+  isNearClimbingZone: boolean;
+  /** Position of the alliance's climbing zone center */
+  climbingZonePosition: Position | null;
 }
 
 /**

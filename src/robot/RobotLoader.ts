@@ -91,7 +91,7 @@ export function parseRobotMarkdown(content: string): RobotConfig {
     getOptionalValue(capabilitiesSection, 'turn_rate', '180')
   );
   const pickupTime = parseNumericValue(
-    getOptionalValue(capabilitiesSection, 'pickup_time', '0.5')
+    getOptionalValue(capabilitiesSection, 'pickup_time', '0.1')
   );
   const shootTime = parseNumericValue(
     getOptionalValue(capabilitiesSection, 'shoot_time', '0.3')
@@ -153,8 +153,8 @@ export function createDefaultRobotConfig(
     turnRate: 180,
     shootingRange: 240,
     shootingAccuracy: 0.7,
-    ballCapacity: 8,
-    pickupTime: 0.5,
+    ballCapacity: 60,
+    pickupTime: 0.1, // Fast pickup (0.1 seconds)
     shootTime: 0.1, // 10 balls/sec (range: 0.067-0.5 for 2-15 balls/sec)
     canClimb: true,
     autoClimb: false,

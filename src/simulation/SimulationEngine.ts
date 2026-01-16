@@ -231,6 +231,9 @@ export class SimulationEngine {
     // Process pickups
     this.processPickups();
 
+    // Process secondary pickups (pickup while shooting)
+    this.processSecondaryPickups(deltaTime);
+
     // Record state
     const state = this.match.getState();
     this.recorder.recordFrame(state);
@@ -343,6 +346,23 @@ export class SimulationEngine {
     const allianceCanAutoClimb = allianceAutoClimbCount < this.config.gameRules.maxAutoClimbers;
     const allianceCanEndgameClimb = allianceEndgameClimbCount < this.config.gameRules.maxEndgameClimbers;
 
+    // Check climbing zone proximity
+    const isNearClimbingZone = this.match.field.isNearClimbingZone(robot.position, robot.alliance);
+
+    // Find climbing zone center position for this alliance
+    let climbingZonePosition = null;
+    for (const zone of this.match.field.config.zones) {
+      if (zone.type !== 'CLIMBING') continue;
+      const isRedZone = zone.bounds.minX < this.match.field.config.width / 2;
+      if ((robot.alliance === 'red' && isRedZone) || (robot.alliance === 'blue' && !isRedZone)) {
+        climbingZonePosition = {
+          x: (zone.bounds.minX + zone.bounds.maxX) / 2,
+          y: (zone.bounds.minY + zone.bounds.maxY) / 2,
+        };
+        break;
+      }
+    }
+
     return {
       gameState: state,
       robot: robot.cloneState(),
@@ -367,6 +387,8 @@ export class SimulationEngine {
       allianceCanEndgameClimb,
       allianceAutoClimbCount,
       allianceEndgameClimbCount,
+      isNearClimbingZone,
+      climbingZonePosition,
     };
   }
 
@@ -426,6 +448,11 @@ export class SimulationEngine {
         break;
 
       case RobotActionType.CLIMBING:
+        // Robot must be near their alliance's climbing zone to climb
+        if (!this.match.field.isNearClimbingZone(robot.position, robot.alliance)) {
+          break; // Can't climb - not near climbing zone
+        }
+
         // Auto climb: during AUTO phase, robot must have autoClimb capability
         if (command.isAutoClimb && robot.config.autoClimb && this.match.clock.isAuto() && robot.isIdle()) {
           robot.startAction(command, this.match.clock.tick);
@@ -698,19 +725,68 @@ export class SimulationEngine {
    * Process automatic ball pickups when robots are near available balls
    */
   private processPickups(): void {
-    // Only process for idle robots with capacity
     for (const robot of this.match.getRobots()) {
-      if (!robot.isIdle() || !robot.canPickUpBall()) continue;
+      if (!robot.canPickUpBall()) continue;
 
-      for (const ball of this.match.getAvailableBalls()) {
-        if (isInPickupRange(robot.position, ball.position, 12)) {
-          // Auto-start pickup action
-          robot.startAction(
-            { type: RobotActionType.PICKING_UP, targetBallId: ball.id },
-            this.match.clock.tick
-          );
-          break;
+      // For idle robots, start a primary pickup action
+      if (robot.isIdle()) {
+        for (const ball of this.match.getAvailableBalls()) {
+          if (isInPickupRange(robot.position, ball.position, 12)) {
+            robot.startAction(
+              { type: RobotActionType.PICKING_UP, targetBallId: ball.id },
+              this.match.clock.tick
+            );
+            break;
+          }
         }
+      }
+      // For shooting robots with balls in hopper, start a secondary pickup
+      else if (robot.isShooting() && robot.hasBalls() && !robot.hasSecondaryAction()) {
+        for (const ball of this.match.getAvailableBalls()) {
+          if (isInPickupRange(robot.position, ball.position, 12)) {
+            robot.startSecondaryPickup(ball.id, this.match.clock.tick);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Process secondary pickup actions (pickup while shooting)
+   */
+  private processSecondaryPickups(deltaTime: number): void {
+    for (const robot of this.match.getRobots()) {
+      if (!robot.hasSecondaryAction()) continue;
+
+      const secondary = robot.secondaryAction;
+      if (!secondary || secondary.type !== RobotActionType.PICKING_UP) continue;
+
+      const progress = secondary.progress + deltaTime / robot.config.pickupTime;
+      robot.updateSecondaryProgress(progress);
+
+      if (progress >= 1) {
+        const ballId = secondary.targetBallId;
+        if (ballId) {
+          const ball = this.match.getBall(ballId);
+          // Use larger tolerance for completion check
+          if (ball && ball.isAvailable() && isInPickupRange(robot.position, ball.position, 24)) {
+            ball.pickup(robot.id, this.match.clock.tick);
+            robot.pickUpBall(ballId);
+
+            this.match.addEvent(GameEventType.BALL_PICKED_UP, {
+              robotId: robot.id,
+              ballId,
+              position: robot.position,
+            });
+
+            this.events.emit(SimulationEvents.BALL_PICKED_UP, {
+              robotId: robot.id,
+              ballId,
+            });
+          }
+        }
+        robot.completeSecondaryAction();
       }
     }
   }

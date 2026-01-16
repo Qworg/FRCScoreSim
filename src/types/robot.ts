@@ -97,6 +97,8 @@ export interface RobotState {
   heldBalls: string[];
   /** Current action being performed */
   currentAction: RobotAction;
+  /** Secondary action (pickup while shooting) */
+  secondaryAction: RobotAction | null;
   /** Whether robot is disabled */
   disabled: boolean;
   /** Whether robot climbed during auto */
