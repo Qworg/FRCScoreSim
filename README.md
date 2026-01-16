@@ -23,8 +23,41 @@ npm run demo
 - **Ball Physics**: Flight trajectories, ground friction, and scoring detection
 - **Pathfinding**: A* algorithm with terrain cost calculations
 - **Strategy System**: Pluggable AI strategies (Collector, Scorer, Idle)
-- **Game Phases**: AUTO, TELEOP, and ENDGAME with configurable timing
+- **Game Phases**: AUTO, Shift-based TELEOP (4 shifts), and ENDGAME with parity-based scoring
 - **WebSocket Visualization**: Real-time state broadcast for external UI clients
+
+## Game Rules: Shift-Based Scoring
+
+The simulator uses a shift-based scoring system where alliances alternate scoring windows during teleop.
+
+### Match Structure (160 seconds total)
+
+| Phase | Duration | Who Can Score |
+|-------|----------|---------------|
+| AUTO | 20s | Both alliances |
+| TRANSITION | 10s | Both alliances |
+| SHIFT 1 | 25s | ODD alliance only |
+| SHIFT 2 | 25s | EVEN alliance only |
+| SHIFT 3 | 25s | ODD alliance only |
+| SHIFT 4 | 25s | EVEN alliance only |
+| ENDGAME | 30s | Both alliances |
+
+### Parity Determination
+
+After AUTO ends, each alliance is assigned a **parity** based on autonomous performance:
+
+- **EVEN parity**: Alliance that scored the **most balls** during AUTO
+  - Scores during Shift 2 and Shift 4
+- **ODD parity**: Alliance that scored **fewer balls** during AUTO
+  - Scores during Shift 1 and Shift 3
+- **Tiebreaker**: If both alliances score the same number of balls, Red gets EVEN parity
+
+### Strategic Implications
+
+- Strong AUTO performance gives you EVEN parity, meaning you score second in each pair of shifts
+- ODD alliance gets first-mover advantage in each shift pair
+- Robots automatically respect scoring windows - they will collect balls during off-shifts and shoot when allowed
+- TRANSITION and ENDGAME are open scoring periods for both alliances
 
 ## Installation
 
@@ -193,7 +226,7 @@ src/
 │
 ├── game/               # Game logic
 │   ├── Match.ts        # Match orchestration
-│   ├── GameClock.ts    # Phase timing (AUTO/TELEOP/ENDGAME)
+│   ├── GameClock.ts    # Phase timing (AUTO/SHIFTS/ENDGAME)
 │   └── ScoringSystem.ts# Point calculations
 │
 ├── simulation/         # Core simulation
@@ -395,10 +428,10 @@ export class AggressiveStrategy extends BaseStrategy {
   readonly description = 'Prioritizes scoring over collection';
 
   decide(context: StrategyContext): StrategyDecision {
-    const { robot, nearestBall, nearestBallDistance, inShootingRange, phase } = context;
+    const { robot, nearestBall, nearestBallDistance, inShootingRange, canScore } = context;
 
-    // Always try to shoot if we have balls and are in range
-    if (robot.heldBalls.length > 0 && inShootingRange && context.nearestScoringTarget) {
+    // Only shoot if we CAN score this phase (respects shift rules)
+    if (canScore && robot.heldBalls.length > 0 && inShootingRange && context.nearestScoringTarget) {
       return this.shoot(
         context.nearestScoringTarget.id,
         StrategyPriority.CRITICAL,
@@ -406,8 +439,8 @@ export class AggressiveStrategy extends BaseStrategy {
       );
     }
 
-    // Move to shooting position if we have balls
-    if (robot.heldBalls.length > 0 && context.nearestScoringTarget) {
+    // Move to shooting position if we have balls and can score
+    if (canScore && robot.heldBalls.length > 0 && context.nearestScoringTarget) {
       return this.moveTo(
         context.nearestScoringTarget.position.x,
         context.nearestScoringTarget.position.y,
@@ -416,7 +449,7 @@ export class AggressiveStrategy extends BaseStrategy {
       );
     }
 
-    // Collect balls
+    // Collect balls (always allowed)
     if (nearestBall && nearestBallDistance !== null) {
       if (nearestBallDistance < 18) {
         return this.pickup(nearestBall.id, StrategyPriority.MEDIUM, 'Picking up');
@@ -426,6 +459,16 @@ export class AggressiveStrategy extends BaseStrategy {
         nearestBall.position.y,
         StrategyPriority.MEDIUM,
         'Collecting'
+      );
+    }
+
+    // During off-shifts, position near scoring zone for when we can score
+    if (!canScore && robot.heldBalls.length > 0 && context.nearestScoringTarget) {
+      return this.moveTo(
+        context.nearestScoringTarget.position.x,
+        context.nearestScoringTarget.position.y,
+        StrategyPriority.LOW,
+        'Positioning for next scoring window'
       );
     }
 
@@ -457,6 +500,9 @@ const setup = {
 | `robot` | `RobotState` | Current robot's state |
 | `phase` | `MatchPhase` | Current match phase |
 | `phaseTimeRemaining` | `number` | Seconds left in phase |
+| `currentShift` | `number \| null` | Current shift (1-4) or null |
+| `allianceParity` | `ShiftParity \| null` | Alliance's parity (EVEN/ODD) |
+| `canScore` | `boolean` | Whether alliance can score this phase |
 | `teammates` | `RobotState[]` | Teammate states |
 | `opponents` | `RobotState[]` | Opponent states |
 | `availableBalls` | `BallData[]` | Balls on field |
@@ -503,14 +549,17 @@ export const DEFAULT_GAME_RULES: GameRules = {
 };
 ```
 
-Edit `src/game/GameClock.ts` to change phase timing:
+Edit `src/types/simulation.ts` to change phase timing:
 
 ```typescript
 export const DEFAULT_PHASE_TIMING: PhaseTiming = {
-  auto: 15,           // 15 seconds autonomous
-  transition: 3,      // 3 second transition
-  teleop: 135,        // 135 seconds teleoperated
-  endgameStart: 30,   // Endgame starts 30 seconds before end
+  auto: 20,        // 20 seconds autonomous
+  transition: 10,  // 10 seconds transition (all can score)
+  shift1: 25,      // 25 seconds - ODD alliance scores
+  shift2: 25,      // 25 seconds - EVEN alliance scores
+  shift3: 25,      // 25 seconds - ODD alliance scores
+  shift4: 25,      // 25 seconds - EVEN alliance scores
+  endgame: 30,     // 30 seconds endgame (all can score)
 };
 ```
 
