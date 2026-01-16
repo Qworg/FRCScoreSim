@@ -7,11 +7,13 @@ import type {
   StrategyContext,
 } from '../types/index.js';
 import {
+  BallState,
   GameEventType,
   RobotActionType,
   SimulationMode,
   DEFAULT_SIMULATION_CONFIG,
 } from '../types/index.js';
+import { Ball } from '../ball/Ball.js';
 import { updateBallPhysics, isInPickupRange, calculateShotVelocity } from '../ball/BallPhysics.js';
 import { Match } from '../game/Match.js';
 import { AStar } from '../pathfinding/AStar.js';
@@ -43,9 +45,10 @@ export class SimulationEngine {
     this.events = new EventBus();
     this.recorder = new MatchRecorder();
 
+    // Initialize field balls first, then robots (which add starting balls)
+    this.match.initializeBalls();
     this.initializeRobots(setup);
     this.initializePathfinders();
-    this.match.initializeBalls();
   }
 
   /**
@@ -69,13 +72,29 @@ export class SimulationEngine {
 
       const robot = new Robot(robotSetup.config, alliance, position, heading);
 
-      // Give robot starting balls (virtual balls not on field)
+      // Give robot starting balls - create actual Ball objects
       const numStartingBalls = Math.min(
         robotSetup.startingBalls ?? 0,
         robot.config.ballCapacity
       );
       for (let i = 0; i < numStartingBalls; i++) {
-        robot.pickUpBall(`starting-ball-${startingBallId++}`);
+        const ballId = `starting-ball-${startingBallId++}`;
+        // Create a real Ball object for the starting ball
+        const ball = new Ball({
+          id: ballId,
+          state: BallState.HELD,
+          position: { ...position }, // Start at robot position
+          height: 0,
+          velocity: { vx: 0, vy: 0, vz: 0 },
+          heldByRobotId: robot.id,
+          shotByRobotId: null,
+          targetPosition: null,
+          spawnPointId: `robot-start-${robot.id}`,
+          alliance: null,
+          lastUpdateTick: 0,
+        });
+        this.match.addBall(ball);
+        robot.pickUpBall(ballId);
       }
 
       robots.push(robot);

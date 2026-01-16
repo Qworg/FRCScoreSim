@@ -104,6 +104,13 @@ export class Match {
   }
 
   /**
+   * Add a ball to the match (e.g., starting balls held by robots)
+   */
+  addBall(ball: Ball): void {
+    this.balls.push(ball);
+  }
+
+  /**
    * Get a robot by ID
    */
   getRobot(id: string): Robot | undefined {

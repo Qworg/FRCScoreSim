@@ -65,6 +65,10 @@
       border: 2px solid #333;
       border-radius: 4px;
       background: #2d4a3e;
+      /* Scale up for better visibility - 1.5x the field dimensions */
+      width: 972px;
+      height: 486px;
+      image-rendering: pixelated;
     }
 
     .sidebar {
@@ -610,7 +614,7 @@
 
         const x = ball.position.x;
         const y = canvas.height - ball.position.y;
-        const radius = 7;
+        const radius = 4; // Smaller for better visibility with 360+ balls
 
         // Ball shadow (if in flight)
         if (ball.state === 'IN_FLIGHT') {
