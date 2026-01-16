@@ -1,6 +1,6 @@
 import type { Ball } from './ball.js';
 import type { FieldConfig, ScoringTarget } from './field.js';
-import type { GameState, MatchPhase } from './game.js';
+import type { GameState, MatchPhase, ShiftParity } from './game.js';
 import type { RobotCommand, RobotState } from './robot.js';
 
 /**
@@ -37,6 +37,12 @@ export interface StrategyContext {
   phase: MatchPhase;
   /** Time remaining in phase */
   phaseTimeRemaining: number;
+  /** Current shift number (1-4) or null if not in a shift */
+  currentShift: number | null;
+  /** This alliance's shift parity (null until after auto) */
+  allianceParity: ShiftParity | null;
+  /** Whether this alliance can score during the current phase */
+  canScore: boolean;
 }
 
 /**

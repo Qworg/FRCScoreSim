@@ -8,17 +8,30 @@ import type { RobotState } from './robot.js';
 export enum MatchPhase {
   /** Before match starts */
   PRE_MATCH = 'PRE_MATCH',
-  /** Autonomous period (15 seconds typical) */
+  /** Autonomous period (20 seconds) */
   AUTO = 'AUTO',
-  /** Pause between auto and teleop */
+  /** Transition shift between auto and shifts (10 seconds) - all can score */
   TRANSITION = 'TRANSITION',
-  /** Teleoperated period */
-  TELEOP = 'TELEOP',
-  /** End game period (last 30 seconds of teleop typically) */
+  /** Shift 1 (25 seconds) - ODD alliance can score */
+  SHIFT_1 = 'SHIFT_1',
+  /** Shift 2 (25 seconds) - EVEN alliance can score */
+  SHIFT_2 = 'SHIFT_2',
+  /** Shift 3 (25 seconds) - ODD alliance can score */
+  SHIFT_3 = 'SHIFT_3',
+  /** Shift 4 (25 seconds) - EVEN alliance can score */
+  SHIFT_4 = 'SHIFT_4',
+  /** End game period (30 seconds) - all can score */
   ENDGAME = 'ENDGAME',
   /** Match has ended */
   POST_MATCH = 'POST_MATCH',
 }
+
+/**
+ * Shift parity - determines which shifts an alliance can score during
+ * EVEN alliance scored most balls in auto, scores during Shift 2 and 4
+ * ODD alliance scores during Shift 1 and 3
+ */
+export type ShiftParity = 'EVEN' | 'ODD';
 
 /**
  * Event types that can occur during a match
@@ -64,7 +77,7 @@ export interface GameEvent {
 export interface AllianceScore {
   /** Points from autonomous period */
   auto: number;
-  /** Points from teleop period */
+  /** Points from teleop period (includes all shifts) */
   teleop: number;
   /** Points from endgame (climbing) */
   endgame: number;
@@ -74,6 +87,8 @@ export interface AllianceScore {
   total: number;
   /** Detailed breakdown by scoring target */
   breakdown: Record<string, number>;
+  /** Number of balls scored during auto (used to determine shift parity) */
+  autoBallCount: number;
 }
 
 /**
@@ -88,14 +103,20 @@ export interface Score {
  * Phase timing configuration
  */
 export interface PhaseTiming {
-  /** Duration in seconds */
+  /** Auto period duration in seconds */
   auto: number;
-  /** Transition duration in seconds */
+  /** Transition shift duration in seconds (all can score) */
   transition: number;
-  /** Teleop duration in seconds */
-  teleop: number;
-  /** Endgame starts this many seconds before teleop ends */
-  endgameStart: number;
+  /** Shift 1 duration in seconds */
+  shift1: number;
+  /** Shift 2 duration in seconds */
+  shift2: number;
+  /** Shift 3 duration in seconds */
+  shift3: number;
+  /** Shift 4 duration in seconds */
+  shift4: number;
+  /** Endgame duration in seconds */
+  endgame: number;
 }
 
 /**
@@ -123,6 +144,12 @@ export interface GameState {
   phase: MatchPhase;
   /** Time remaining in current phase (seconds) */
   phaseTimeRemaining: number;
+  /** Current shift number (1-4) or null if not in a shift */
+  currentShift: number | null;
+  /** Red alliance shift parity (determined after auto) */
+  redParity: ShiftParity | null;
+  /** Blue alliance shift parity (determined after auto) */
+  blueParity: ShiftParity | null;
   /** All robots */
   robots: RobotState[];
   /** All balls */

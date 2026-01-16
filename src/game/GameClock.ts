@@ -53,6 +53,24 @@ export class GameClock {
   }
 
   /**
+   * Get current shift number (1-4) or null if not in a shift
+   */
+  get currentShift(): number | null {
+    switch (this.currentPhase) {
+      case MatchPhase.SHIFT_1:
+        return 1;
+      case MatchPhase.SHIFT_2:
+        return 2;
+      case MatchPhase.SHIFT_3:
+        return 3;
+      case MatchPhase.SHIFT_4:
+        return 4;
+      default:
+        return null;
+    }
+  }
+
+  /**
    * Start the match
    */
   startMatch(): void {
@@ -78,16 +96,6 @@ export class GameClock {
     const phaseElapsed = (this.currentTick - this.phaseStartTick) / this.tickRate;
     const phaseDuration = this.getPhaseDuration(this.currentPhase);
 
-    // Check for endgame transition within teleop
-    if (this.currentPhase === MatchPhase.TELEOP) {
-      const teleopRemaining = phaseDuration - phaseElapsed;
-      if (teleopRemaining <= this.timing.endgameStart) {
-        this.currentPhase = MatchPhase.ENDGAME;
-        // Don't reset phaseStartTick - endgame is part of teleop
-        return this.currentPhase;
-      }
-    }
-
     if (phaseElapsed >= phaseDuration) {
       return this.advancePhase();
     }
@@ -106,9 +114,20 @@ export class GameClock {
         this.currentPhase = MatchPhase.TRANSITION;
         break;
       case MatchPhase.TRANSITION:
-        this.currentPhase = MatchPhase.TELEOP;
+        this.currentPhase = MatchPhase.SHIFT_1;
         break;
-      case MatchPhase.TELEOP:
+      case MatchPhase.SHIFT_1:
+        this.currentPhase = MatchPhase.SHIFT_2;
+        break;
+      case MatchPhase.SHIFT_2:
+        this.currentPhase = MatchPhase.SHIFT_3;
+        break;
+      case MatchPhase.SHIFT_3:
+        this.currentPhase = MatchPhase.SHIFT_4;
+        break;
+      case MatchPhase.SHIFT_4:
+        this.currentPhase = MatchPhase.ENDGAME;
+        break;
       case MatchPhase.ENDGAME:
         this.currentPhase = MatchPhase.POST_MATCH;
         break;
@@ -128,10 +147,16 @@ export class GameClock {
         return this.timing.auto;
       case MatchPhase.TRANSITION:
         return this.timing.transition;
-      case MatchPhase.TELEOP:
+      case MatchPhase.SHIFT_1:
+        return this.timing.shift1;
+      case MatchPhase.SHIFT_2:
+        return this.timing.shift2;
+      case MatchPhase.SHIFT_3:
+        return this.timing.shift3;
+      case MatchPhase.SHIFT_4:
+        return this.timing.shift4;
       case MatchPhase.ENDGAME:
-        // Endgame is a sub-phase of teleop, uses same timing
-        return this.timing.teleop;
+        return this.timing.endgame;
       default:
         return 0;
     }
@@ -141,7 +166,15 @@ export class GameClock {
    * Get total match duration in seconds
    */
   getTotalMatchDuration(): number {
-    return this.timing.auto + this.timing.transition + this.timing.teleop;
+    return (
+      this.timing.auto +
+      this.timing.transition +
+      this.timing.shift1 +
+      this.timing.shift2 +
+      this.timing.shift3 +
+      this.timing.shift4 +
+      this.timing.endgame
+    );
   }
 
   /**
@@ -169,13 +202,22 @@ export class GameClock {
   }
 
   /**
-   * Check if currently in teleop (including endgame)
+   * Check if currently in a shift phase (1-4)
+   */
+  isShift(): boolean {
+    return (
+      this.currentPhase === MatchPhase.SHIFT_1 ||
+      this.currentPhase === MatchPhase.SHIFT_2 ||
+      this.currentPhase === MatchPhase.SHIFT_3 ||
+      this.currentPhase === MatchPhase.SHIFT_4
+    );
+  }
+
+  /**
+   * Check if currently in teleop (shifts or endgame)
    */
   isTeleop(): boolean {
-    return (
-      this.currentPhase === MatchPhase.TELEOP ||
-      this.currentPhase === MatchPhase.ENDGAME
-    );
+    return this.isShift() || this.currentPhase === MatchPhase.ENDGAME;
   }
 
   /**

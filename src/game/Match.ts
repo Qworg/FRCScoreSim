@@ -230,9 +230,25 @@ export class Match {
    * Handle phase change
    */
   handlePhaseChange(newPhase: MatchPhase): void {
+    // Determine shift parity when leaving AUTO phase
+    if (newPhase === MatchPhase.TRANSITION) {
+      this.scoring.determineShiftParity();
+    }
+
     this.addEvent(GameEventType.PHASE_CHANGE, {
-      details: { newPhase },
+      details: {
+        newPhase,
+        redParity: this.scoring.getShiftParity('red'),
+        blueParity: this.scoring.getShiftParity('blue'),
+      },
     });
+  }
+
+  /**
+   * Check if an alliance can score during the current phase
+   */
+  canAllianceScore(alliance: 'red' | 'blue'): boolean {
+    return this.scoring.canAllianceScore(alliance, this.clock.phase);
   }
 
   /**
@@ -272,6 +288,9 @@ export class Match {
       elapsedTime: this.clock.elapsedTime,
       phase: this.clock.phase,
       phaseTimeRemaining: this.clock.phaseTimeRemaining,
+      currentShift: this.clock.currentShift,
+      redParity: this.scoring.getShiftParity('red'),
+      blueParity: this.scoring.getShiftParity('blue'),
       robots: this.robots.map((r) => r.cloneState()),
       balls: this.balls.map((b) => b.cloneData()),
       score: this.scoring.cloneScore(),

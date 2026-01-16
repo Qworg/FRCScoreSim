@@ -295,6 +295,9 @@ export class SimulationEngine {
       nearestScoringTargetDistance !== null &&
       nearestScoringTargetDistance <= robot.config.shootingRange;
 
+    const allianceParity = robot.alliance === 'red' ? state.redParity : state.blueParity;
+    const canScore = this.match.canAllianceScore(robot.alliance);
+
     return {
       gameState: state,
       robot: robot.cloneState(),
@@ -311,6 +314,9 @@ export class SimulationEngine {
       inShootingRange,
       phase: this.match.clock.phase,
       phaseTimeRemaining: this.match.clock.phaseTimeRemaining,
+      currentShift: this.match.clock.currentShift,
+      allianceParity,
+      canScore,
     };
   }
 

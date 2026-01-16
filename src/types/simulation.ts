@@ -74,10 +74,13 @@ export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   },
   gameRules: {
     timing: {
-      auto: 15,
-      transition: 3,
-      teleop: 135,
-      endgameStart: 30,
+      auto: 20,        // 20 seconds autonomous
+      transition: 10,  // 10 seconds transition (all can score)
+      shift1: 25,      // 25 seconds - ODD alliance scores
+      shift2: 25,      // 25 seconds - EVEN alliance scores
+      shift3: 25,      // 25 seconds - ODD alliance scores
+      shift4: 25,      // 25 seconds - EVEN alliance scores
+      endgame: 30,     // 30 seconds endgame (all can score)
     },
     climbPoints: 25,
     penaltyPoints: 3,

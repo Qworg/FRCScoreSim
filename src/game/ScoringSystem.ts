@@ -2,6 +2,7 @@ import type {
   AllianceScore,
   GameRules,
   Score,
+  ShiftParity,
   ScoringTarget,
 } from '../types/index.js';
 import { MatchPhase, DEFAULT_SIMULATION_CONFIG } from '../types/index.js';
@@ -22,6 +23,7 @@ export function createAllianceScore(): AllianceScore {
     penalties: 0,
     total: 0,
     breakdown: {},
+    autoBallCount: 0,
   };
 }
 
@@ -41,6 +43,9 @@ export function createScore(): Score {
 export class ScoringSystem {
   private score: Score;
   private rules: GameRules;
+  private redParity: ShiftParity | null = null;
+  private blueParity: ShiftParity | null = null;
+  private parityDetermined: boolean = false;
 
   constructor(rules: GameRules = DEFAULT_GAME_RULES) {
     this.rules = rules;
@@ -62,6 +67,67 @@ export class ScoringSystem {
   }
 
   /**
+   * Get shift parity for an alliance (null if not yet determined)
+   */
+  getShiftParity(alliance: 'red' | 'blue'): ShiftParity | null {
+    return alliance === 'red' ? this.redParity : this.blueParity;
+  }
+
+  /**
+   * Determine shift parity based on auto ball counts
+   * Should be called when transitioning out of AUTO phase
+   */
+  determineShiftParity(): void {
+    if (this.parityDetermined) return;
+
+    const redBalls = this.score.red.autoBallCount;
+    const blueBalls = this.score.blue.autoBallCount;
+
+    // Alliance that scores MOST balls during auto is EVEN (scores in Shift 2 and 4)
+    // If tied, red is EVEN (arbitrary tiebreaker)
+    if (redBalls >= blueBalls) {
+      this.redParity = 'EVEN';
+      this.blueParity = 'ODD';
+    } else {
+      this.redParity = 'ODD';
+      this.blueParity = 'EVEN';
+    }
+
+    this.parityDetermined = true;
+  }
+
+  /**
+   * Check if an alliance can score during the current phase
+   */
+  canAllianceScore(alliance: 'red' | 'blue', phase: MatchPhase): boolean {
+    // Everyone can score during AUTO, TRANSITION, and ENDGAME
+    if (
+      phase === MatchPhase.AUTO ||
+      phase === MatchPhase.TRANSITION ||
+      phase === MatchPhase.ENDGAME
+    ) {
+      return true;
+    }
+
+    // During shifts, only the designated alliance can score
+    const parity = this.getShiftParity(alliance);
+    if (!parity) return true; // If parity not determined, allow scoring
+
+    switch (phase) {
+      case MatchPhase.SHIFT_1:
+      case MatchPhase.SHIFT_3:
+        // ODD alliance scores during shifts 1 and 3
+        return parity === 'ODD';
+      case MatchPhase.SHIFT_2:
+      case MatchPhase.SHIFT_4:
+        // EVEN alliance scores during shifts 2 and 4
+        return parity === 'EVEN';
+      default:
+        return true;
+    }
+  }
+
+  /**
    * Record a scored ball
    */
   recordScore(
@@ -76,6 +142,7 @@ export class ScoringSystem {
 
     if (isAuto) {
       allianceScore.auto += points;
+      allianceScore.autoBallCount++; // Track ball count for parity determination
     } else {
       allianceScore.teleop += points;
     }
@@ -158,6 +225,9 @@ export class ScoringSystem {
    */
   reset(): void {
     this.score = createScore();
+    this.redParity = null;
+    this.blueParity = null;
+    this.parityDetermined = false;
   }
 
   /**

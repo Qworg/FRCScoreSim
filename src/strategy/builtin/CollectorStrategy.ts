@@ -4,6 +4,7 @@ import { BaseStrategy } from '../BaseStrategy.js';
 
 /**
  * Collector strategy - focuses on gathering balls
+ * Respects shift-based scoring rules: only shoots when alliance can score
  */
 export class CollectorStrategy extends BaseStrategy {
   readonly id = 'collector';
@@ -11,7 +12,7 @@ export class CollectorStrategy extends BaseStrategy {
   readonly description = 'Focus on collecting balls and bringing them to teammates';
 
   decide(context: StrategyContext): StrategyDecision {
-    const { robot, nearestBall, nearestBallDistance, phase } = context;
+    const { robot, nearestBall, nearestBallDistance, phase, canScore } = context;
 
     // In endgame, try to climb if we can
     if (phase === MatchPhase.ENDGAME && robot.config.canClimb && !robot.hasClimbed) {
@@ -20,6 +21,15 @@ export class CollectorStrategy extends BaseStrategy {
 
     // If at capacity, find a teammate to pass to or go to scoring zone
     if (robot.heldBalls.length >= robot.config.ballCapacity) {
+      // If we can score and in range, shoot
+      if (canScore && context.inShootingRange && context.nearestScoringTarget) {
+        return this.shoot(
+          context.nearestScoringTarget.id,
+          StrategyPriority.HIGH,
+          'At capacity and can score - shooting'
+        );
+      }
+
       // If already moving, let it continue
       if (robot.currentAction.type === RobotActionType.MOVING) {
         return this.idle('Continuing to scoring area');
@@ -30,10 +40,10 @@ export class CollectorStrategy extends BaseStrategy {
           nearestTarget.position.x,
           nearestTarget.position.y,
           StrategyPriority.MEDIUM,
-          'At capacity, moving to scoring area to offload'
+          canScore ? 'At capacity, moving to scoring area' : 'At capacity, positioning for next scoring window'
         );
       }
-      return this.idle('At capacity, waiting');
+      return this.idle(canScore ? 'At capacity, waiting' : 'At capacity, waiting for scoring window');
     }
 
     // If there's a ball nearby, go get it
@@ -61,28 +71,28 @@ export class CollectorStrategy extends BaseStrategy {
       );
     }
 
-    // No balls available - if we have any, shoot them or move to scoring zone
+    // No balls available - if we have any, shoot them (if allowed) or move to scoring zone
     if (robot.heldBalls.length > 0) {
-      // If in shooting range, shoot
-      if (context.inShootingRange && context.nearestScoringTarget) {
+      // If we can score and in shooting range, shoot
+      if (canScore && context.inShootingRange && context.nearestScoringTarget) {
         return this.shoot(
           context.nearestScoringTarget.id,
           StrategyPriority.MEDIUM,
-          'No balls left, shooting held balls'
+          'No balls left to collect, shooting held balls'
         );
       }
       // If already moving, let it continue
       if (robot.currentAction.type === RobotActionType.MOVING) {
         return this.idle('Continuing to scoring area');
       }
-      // Move to scoring zone
+      // Move to scoring zone (to be ready when we can score or to find balls)
       const nearestTarget = context.nearestScoringTarget;
       if (nearestTarget) {
         return this.moveTo(
           nearestTarget.position.x,
           nearestTarget.position.y,
           StrategyPriority.MEDIUM,
-          'No balls left, moving to scoring area'
+          canScore ? 'No balls left, moving to scoring area' : 'Positioning for next scoring window'
         );
       }
     }

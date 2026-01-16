@@ -8,6 +8,7 @@ import { BaseStrategy } from '../BaseStrategy.js';
 
 /**
  * Scorer strategy - focuses on scoring balls in goals
+ * Respects shift-based scoring rules: only shoots when alliance can score
  */
 export class ScorerStrategy extends BaseStrategy {
   readonly id = 'scorer';
@@ -23,12 +24,13 @@ export class ScorerStrategy extends BaseStrategy {
       nearestScoringTargetDistance,
       inShootingRange,
       phase,
+      canScore,
     } = context;
 
     // In endgame, prioritize climbing
     if (phase === MatchPhase.ENDGAME && robot.config.canClimb && !robot.hasClimbed) {
-      // Shoot any remaining balls first
-      if (robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
+      // Shoot any remaining balls first (if we can score)
+      if (canScore && robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
         return this.shoot(
           nearestScoringTarget.id,
           StrategyPriority.HIGH,
@@ -40,8 +42,8 @@ export class ScorerStrategy extends BaseStrategy {
       return this.climb(StrategyPriority.CRITICAL, 'Endgame - climbing');
     }
 
-    // If we have balls and in range, shoot! (even interrupts movement)
-    if (robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
+    // If we can score and have balls and in range, shoot!
+    if (canScore && robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
       return this.shoot(
         nearestScoringTarget.id,
         StrategyPriority.HIGH,
@@ -49,8 +51,8 @@ export class ScorerStrategy extends BaseStrategy {
       );
     }
 
-    // If we have balls but not in range, move to scoring position
-    if (robot.heldBalls.length > 0 && nearestScoringTarget) {
+    // If we can score and have balls but not in range, move to scoring position
+    if (canScore && robot.heldBalls.length > 0 && nearestScoringTarget) {
       // If already moving, let it continue
       if (robot.currentAction.type === RobotActionType.MOVING) {
         return this.idle('Continuing to shooting position');
@@ -79,7 +81,38 @@ export class ScorerStrategy extends BaseStrategy {
       }
     }
 
-    // If we don't have balls, go collect
+    // If we can't score right now but have balls, position for when we can
+    if (!canScore && robot.heldBalls.length > 0 && nearestScoringTarget) {
+      // Position ourselves for when we can score
+      if (robot.currentAction.type === RobotActionType.MOVING) {
+        return this.idle('Positioning for next scoring window');
+      }
+
+      const shootingRange = robot.config.shootingRange * 0.8;
+      const targetDist = nearestScoringTargetDistance ?? Infinity;
+
+      if (targetDist > shootingRange) {
+        const dx = nearestScoringTarget.position.x - robot.position.x;
+        const dy = nearestScoringTarget.position.y - robot.position.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const ratio = shootingRange / dist;
+
+        const targetX = nearestScoringTarget.position.x - dx * ratio;
+        const targetY = nearestScoringTarget.position.y - dy * ratio;
+
+        return this.moveTo(
+          targetX,
+          targetY,
+          StrategyPriority.MEDIUM,
+          'Positioning for next scoring window'
+        );
+      }
+
+      // Already in position, wait for our turn
+      return this.idle('Waiting for scoring window');
+    }
+
+    // If we don't have balls (or don't have max capacity), go collect
     if (robot.heldBalls.length < robot.config.ballCapacity) {
       if (nearestBall && nearestBallDistance !== null) {
         // If very close, start pickup (even interrupts movement)
