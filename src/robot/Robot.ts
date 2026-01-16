@@ -171,6 +171,8 @@ export class Robot {
       targetBallId: command.targetBallId,
       targetScoringZoneId: command.targetScoringZoneId,
       targetRobotId: command.targetRobotId,
+      targetClimbLevel: command.targetClimbLevel,
+      isAutoClimb: command.isAutoClimb,
       progress: 0,
       startedAt: tick,
     };

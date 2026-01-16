@@ -39,17 +39,17 @@ export class CollectorStrategy extends BaseStrategy {
       );
     }
 
-    // If at capacity, find a teammate to pass to or go to scoring zone
-    if (robot.heldBalls.length >= robot.config.ballCapacity) {
-      // If we can score and in range, shoot
-      if (canScore && context.inShootingRange && context.nearestScoringTarget) {
-        return this.shoot(
-          context.nearestScoringTarget.id,
-          StrategyPriority.HIGH,
-          'At capacity and can score - shooting'
-        );
-      }
+    // If we have balls and can score and in range, shoot them
+    if (robot.heldBalls.length > 0 && canScore && context.inShootingRange && context.nearestScoringTarget) {
+      return this.shoot(
+        context.nearestScoringTarget.id,
+        StrategyPriority.HIGH,
+        'Can score - shooting'
+      );
+    }
 
+    // If at capacity but not in range, move to scoring zone
+    if (robot.heldBalls.length >= robot.config.ballCapacity) {
       // If already moving, let it continue
       if (robot.currentAction.type === RobotActionType.MOVING) {
         return this.idle('Continuing to scoring area');
