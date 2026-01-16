@@ -65,7 +65,7 @@ export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   mode: SimulationMode.HEADLESS,
   seed: null,
   ballPhysics: {
-    radius: 3.5, // 7" diameter ball
+    radius: 2.5, // 5" diameter ball
     groundFriction: 0.95,
     airResistance: 0.99,
     gravity: 386, // ~32 ft/s^2 in inches
