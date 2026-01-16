@@ -58,6 +58,7 @@ export class SimulationEngine {
 
     let redIndex = 0;
     let blueIndex = 0;
+    let startingBallId = 1;
 
     for (const robotSetup of setup.robots) {
       const alliance = robotSetup.alliance;
@@ -67,8 +68,17 @@ export class SimulationEngine {
       const heading = alliance === 'red' ? 0 : 180;
 
       const robot = new Robot(robotSetup.config, alliance, position, heading);
-      robots.push(robot);
 
+      // Give robot starting balls (virtual balls not on field)
+      const numStartingBalls = Math.min(
+        robotSetup.startingBalls ?? 0,
+        robot.config.ballCapacity
+      );
+      for (let i = 0; i < numStartingBalls; i++) {
+        robot.pickUpBall(`starting-ball-${startingBallId++}`);
+      }
+
+      robots.push(robot);
       this.robotStrategies.set(robot.id, robotSetup.strategy);
     }
 

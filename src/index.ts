@@ -173,39 +173,25 @@ export async function runRealtimeMatch(
  * Quick demo - create a match with default robots
  */
 export function createDemoSetup(): MatchSetup {
-  // Generate ball spawn points spread across the field
+  // Generate 360 balls in center: 12 columns × 30 rows
   const ballSpawnPoints = [];
   let ballId = 1;
 
-  // Center line balls (neutral) - at field midline x=324
-  for (let y = 54; y <= 270; y += 54) {
-    ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x: 324, y }, alliance: null });
-  }
+  // Ball grid: 12 horizontal × 30 vertical = 360 balls
+  // Center at x=324, spread balls around it
+  // Horizontal: 12 balls with ~10" spacing = 110" total, centered at 324
+  // Vertical: 30 balls with ~10" spacing = 290" total, centered at 162
+  const cols = 12;
+  const rows = 30;
+  const hSpacing = 10; // inches between balls horizontally
+  const vSpacing = 10; // inches between balls vertically
+  const startX = 324 - ((cols - 1) * hSpacing) / 2; // center horizontally
+  const startY = 162 - ((rows - 1) * vSpacing) / 2; // center vertically
 
-  // Red side balls - between red climb (x=42) and red goal (x=162)
-  for (let x = 70; x <= 130; x += 30) {
-    for (let y = 81; y <= 243; y += 81) {
-      ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x, y }, alliance: null });
-    }
-  }
-
-  // Red-center balls - between red goal (x=162) and center (x=324)
-  for (let x = 220; x <= 280; x += 30) {
-    for (let y = 108; y <= 216; y += 108) {
-      ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x, y }, alliance: null });
-    }
-  }
-
-  // Blue-center balls - between center (x=324) and blue goal (x=486)
-  for (let x = 368; x <= 428; x += 30) {
-    for (let y = 108; y <= 216; y += 108) {
-      ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x, y }, alliance: null });
-    }
-  }
-
-  // Blue side balls - between blue goal (x=486) and blue climb (x=606)
-  for (let x = 518; x <= 578; x += 30) {
-    for (let y = 81; y <= 243; y += 81) {
+  for (let col = 0; col < cols; col++) {
+    for (let row = 0; row < rows; row++) {
+      const x = startX + col * hSpacing;
+      const y = startY + row * vSpacing;
       ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x, y }, alliance: null });
     }
   }
@@ -288,12 +274,12 @@ export function createDemoSetup(): MatchSetup {
   return {
     field: fieldConfig,
     robots: [
-      { config: red1, alliance: 'red', strategy: 'scorer' },
-      { config: red2, alliance: 'red', strategy: 'collector' },
-      { config: red3, alliance: 'red', strategy: 'scorer' },
-      { config: blue1, alliance: 'blue', strategy: 'scorer' },
-      { config: blue2, alliance: 'blue', strategy: 'collector' },
-      { config: blue3, alliance: 'blue', strategy: 'scorer' },
+      { config: red1, alliance: 'red', strategy: 'scorer', startingBalls: 8 },
+      { config: red2, alliance: 'red', strategy: 'collector', startingBalls: 8 },
+      { config: red3, alliance: 'red', strategy: 'scorer', startingBalls: 8 },
+      { config: blue1, alliance: 'blue', strategy: 'scorer', startingBalls: 8 },
+      { config: blue2, alliance: 'blue', strategy: 'collector', startingBalls: 8 },
+      { config: blue3, alliance: 'blue', strategy: 'scorer', startingBalls: 8 },
     ],
     simulation: DEFAULT_SIMULATION_CONFIG,
   };

@@ -43,6 +43,8 @@ export interface RobotSetup {
   alliance: 'red' | 'blue';
   /** Strategy identifier to use */
   strategy: string;
+  /** Number of balls robot starts with (default: 0) */
+  startingBalls?: number;
 }
 
 /**

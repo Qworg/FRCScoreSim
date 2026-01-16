@@ -153,9 +153,9 @@ export function createDefaultRobotConfig(
     turnRate: 180,
     shootingRange: 240,
     shootingAccuracy: 0.7,
-    ballCapacity: 5,
+    ballCapacity: 8,
     pickupTime: 0.5,
-    shootTime: 0.3,
+    shootTime: 0.1, // 10 balls/sec (range: 0.067-0.5 for 2-15 balls/sec)
     canClimb: true,
     autoClimb: false,
     climbLevel: 2,
