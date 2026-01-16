@@ -49,14 +49,17 @@ describe('Simulation Integration', () => {
     setup.simulation.mode = SimulationMode.HEADLESS;
     setup.simulation.tickRate = 60;
 
-    // Custom shorter match for faster test
+    // Custom shorter match for faster test (shift-based timing)
     setup.simulation.gameRules = {
       ...setup.simulation.gameRules,
       timing: {
         auto: 5,
         transition: 1,
-        teleop: 10,
-        endgameStart: 3,
+        shift1: 3,
+        shift2: 3,
+        shift3: 3,
+        shift4: 3,
+        endgame: 5,
       },
     };
 
@@ -67,8 +70,8 @@ describe('Simulation Integration', () => {
 
     const result = await engine.start();
 
-    // Total time should be approximately auto + transition + teleop
-    const expectedTime = 5 + 1 + 10;
+    // Total time should be approximately auto + transition + shifts + endgame
+    const expectedTime = 5 + 1 + 3 + 3 + 3 + 3 + 5;
     expect(result.totalTime).toBeCloseTo(expectedTime, 0);
   });
 
