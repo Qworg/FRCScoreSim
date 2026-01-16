@@ -1,0 +1,149 @@
+{
+  "name": "Infinite Recharge",
+  "year": 2020,
+  "width": 648,
+  "height": 324,
+  "cellSize": 1,
+  "zones": [
+    {
+      "name": "Red Initiation Line",
+      "type": "NORMAL",
+      "bounds": { "minX": 0, "maxX": 120, "minY": 0, "maxY": 324 },
+      "modifiers": { "alliance": "red" }
+    },
+    {
+      "name": "Blue Initiation Line",
+      "type": "NORMAL",
+      "bounds": { "minX": 528, "maxX": 648, "minY": 0, "maxY": 324 },
+      "modifiers": { "alliance": "blue" }
+    },
+    {
+      "name": "Red Trench",
+      "type": "TRENCH",
+      "bounds": { "minX": 206, "maxX": 374, "minY": 0, "maxY": 56 },
+      "modifiers": { "maxHeight": 24 }
+    },
+    {
+      "name": "Blue Trench",
+      "type": "TRENCH",
+      "bounds": { "minX": 274, "maxX": 442, "minY": 268, "maxY": 324 },
+      "modifiers": { "maxHeight": 24 }
+    },
+    {
+      "name": "Shield Generator",
+      "type": "OBSTACLE",
+      "bounds": { "minX": 282, "maxX": 366, "minY": 120, "maxY": 204 }
+    },
+    {
+      "name": "Red Rendezvous Point",
+      "type": "SCORING_ZONE",
+      "bounds": { "minX": 206, "maxX": 282, "minY": 120, "maxY": 204 },
+      "modifiers": { "alliance": "red" }
+    },
+    {
+      "name": "Blue Rendezvous Point",
+      "type": "SCORING_ZONE",
+      "bounds": { "minX": 366, "maxX": 442, "minY": 120, "maxY": 204 },
+      "modifiers": { "alliance": "blue" }
+    },
+    {
+      "name": "Red Climbing Zone",
+      "type": "CLIMBING",
+      "bounds": { "minX": 0, "maxX": 96, "minY": 119, "maxY": 205 },
+      "modifiers": { "climbable": true, "alliance": "red" }
+    },
+    {
+      "name": "Blue Climbing Zone",
+      "type": "CLIMBING",
+      "bounds": { "minX": 552, "maxX": 648, "minY": 119, "maxY": 205 },
+      "modifiers": { "climbable": true, "alliance": "blue" }
+    }
+  ],
+  "ballSpawnPoints": [
+    { "id": "ball-1", "position": { "x": 120, "y": 114 }, "alliance": null },
+    { "id": "ball-2", "position": { "x": 120, "y": 162 }, "alliance": null },
+    { "id": "ball-3", "position": { "x": 120, "y": 210 }, "alliance": null },
+    { "id": "ball-4", "position": { "x": 206, "y": 28 }, "alliance": null },
+    { "id": "ball-5", "position": { "x": 260, "y": 28 }, "alliance": null },
+    { "id": "ball-6", "position": { "x": 314, "y": 28 }, "alliance": null },
+    { "id": "ball-7", "position": { "x": 528, "y": 114 }, "alliance": null },
+    { "id": "ball-8", "position": { "x": 528, "y": 162 }, "alliance": null },
+    { "id": "ball-9", "position": { "x": 528, "y": 210 }, "alliance": null },
+    { "id": "ball-10", "position": { "x": 334, "y": 296 }, "alliance": null },
+    { "id": "ball-11", "position": { "x": 388, "y": 296 }, "alliance": null }
+  ],
+  "scoringTargets": [
+    {
+      "id": "red-outer-port",
+      "name": "Red Outer Port",
+      "position": { "x": 0, "y": 226 },
+      "radius": 30,
+      "minHeight": 72,
+      "maxHeight": 120,
+      "alliance": "red",
+      "points": { "auto": 2, "teleop": 1 }
+    },
+    {
+      "id": "red-inner-port",
+      "name": "Red Inner Port",
+      "position": { "x": 0, "y": 226 },
+      "radius": 13,
+      "minHeight": 81,
+      "maxHeight": 100,
+      "alliance": "red",
+      "points": { "auto": 6, "teleop": 3 }
+    },
+    {
+      "id": "red-low-port",
+      "name": "Red Low Port",
+      "position": { "x": 0, "y": 226 },
+      "radius": 24,
+      "minHeight": 0,
+      "maxHeight": 24,
+      "alliance": "red",
+      "points": { "auto": 2, "teleop": 1 }
+    },
+    {
+      "id": "blue-outer-port",
+      "name": "Blue Outer Port",
+      "position": { "x": 648, "y": 98 },
+      "radius": 30,
+      "minHeight": 72,
+      "maxHeight": 120,
+      "alliance": "blue",
+      "points": { "auto": 2, "teleop": 1 }
+    },
+    {
+      "id": "blue-inner-port",
+      "name": "Blue Inner Port",
+      "position": { "x": 648, "y": 98 },
+      "radius": 13,
+      "minHeight": 81,
+      "maxHeight": 100,
+      "alliance": "blue",
+      "points": { "auto": 6, "teleop": 3 }
+    },
+    {
+      "id": "blue-low-port",
+      "name": "Blue Low Port",
+      "position": { "x": 648, "y": 98 },
+      "radius": 24,
+      "minHeight": 0,
+      "maxHeight": 24,
+      "alliance": "blue",
+      "points": { "auto": 2, "teleop": 1 }
+    }
+  ],
+  "startingPositions": {
+    "red": [
+      { "x": 48, "y": 95 },
+      { "x": 48, "y": 162 },
+      { "x": 48, "y": 229 }
+    ],
+    "blue": [
+      { "x": 600, "y": 95 },
+      { "x": 600, "y": 162 },
+      { "x": 600, "y": 229 }
+    ]
+  }
+}

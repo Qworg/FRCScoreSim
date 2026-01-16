@@ -1,0 +1,29 @@
+{
+  "name": "frcscoresim",
+  "version": "1.0.0",
+  "description": "FRC Robot Simulator with configurable field, pathfinding, and AI strategies",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "keywords": ["frc", "robot", "simulator", "pathfinding"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "nanoid": "^5.0.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.2.0"
+  }
+}
