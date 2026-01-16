@@ -559,6 +559,24 @@ export class SimulationEngine {
    */
   private updateClimbingRobot(robot: Robot, deltaTime: number): void {
     const isAutoClimb = robot.currentAction.isAutoClimb === true;
+
+    // Check if climb is still valid - give up if conditions no longer met
+    if (isAutoClimb) {
+      // Auto climb requires: AUTO phase and available slots
+      if (!this.match.clock.isAuto() || !this.match.scoring.canAutoClimb(robot.alliance)) {
+        // Phase changed or slots filled - give up
+        robot.completeAction();
+        return;
+      }
+    } else {
+      // Endgame climb requires: ENDGAME phase and available slots
+      if (!this.match.clock.isEndgame() || !this.match.scoring.canEndgameClimb(robot.alliance)) {
+        // Phase changed or slots filled - give up
+        robot.completeAction();
+        return;
+      }
+    }
+
     const climbTime = robot.config.climbUpTime;
     const progress = robot.currentAction.progress + deltaTime / climbTime;
     robot.updateProgress(progress);
