@@ -96,7 +96,7 @@ export type { ParsedSection } from './utils/MarkdownParser.js';
 
 // Convenience function to run a complete simulation
 import type { MatchResult, MatchSetup, SimulationConfig } from './types/index.js';
-import { SimulationMode, DEFAULT_SIMULATION_CONFIG } from './types/index.js';
+import { SimulationMode, DEFAULT_SIMULATION_CONFIG, ZoneType } from './types/index.js';
 import { loadFieldFromFile } from './field/FieldLoader.js';
 import { loadRobotFromFile, createDefaultRobotConfig } from './robot/RobotLoader.js';
 import { SimulationEngine } from './simulation/SimulationEngine.js';
@@ -177,61 +177,98 @@ export function createDemoSetup(): MatchSetup {
   const ballSpawnPoints = [];
   let ballId = 1;
 
-  // Center line balls (neutral)
+  // Center line balls (neutral) - at field midline x=324
   for (let y = 54; y <= 270; y += 54) {
     ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x: 324, y }, alliance: null });
   }
 
-  // Red side balls (closer to red goal)
-  for (let x = 150; x <= 250; x += 50) {
+  // Red side balls - between red climb (x=42) and red goal (x=162)
+  for (let x = 70; x <= 130; x += 30) {
     for (let y = 81; y <= 243; y += 81) {
       ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x, y }, alliance: null });
     }
   }
 
-  // Blue side balls (closer to blue goal)
-  for (let x = 398; x <= 498; x += 50) {
+  // Red-center balls - between red goal (x=162) and center (x=324)
+  for (let x = 220; x <= 280; x += 30) {
+    for (let y = 108; y <= 216; y += 108) {
+      ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x, y }, alliance: null });
+    }
+  }
+
+  // Blue-center balls - between center (x=324) and blue goal (x=486)
+  for (let x = 368; x <= 428; x += 30) {
+    for (let y = 108; y <= 216; y += 108) {
+      ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x, y }, alliance: null });
+    }
+  }
+
+  // Blue side balls - between blue goal (x=486) and blue climb (x=606)
+  for (let x = 518; x <= 578; x += 30) {
     for (let y = 81; y <= 243; y += 81) {
       ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x, y }, alliance: null });
     }
   }
 
+  // Field layout:
+  // - Red side: x = 0 to 324, Blue side: x = 324 to 648
+  // - Red midline (1/4 field): x = 162
+  // - Blue midline (3/4 field): x = 486
+  // - Goals at each side's midline
+  // - Climbing apparatus at field ends (42" wide = 3.5')
   const fieldConfig = {
     name: 'Demo Field',
     year: 2025,
     width: 648,
     height: 324,
     cellSize: 1,
-    zones: [],
+    zones: [
+      // Red climbing apparatus at red end (x=0-42, 3.5' wide)
+      {
+        name: 'Red Climbing Apparatus',
+        type: ZoneType.CLIMBING,
+        bounds: { minX: 0, maxX: 42, minY: 120, maxY: 204 }, // centered vertically
+      },
+      // Blue climbing apparatus at blue end (x=606-648, 3.5' wide)
+      {
+        name: 'Blue Climbing Apparatus',
+        type: ZoneType.CLIMBING,
+        bounds: { minX: 606, maxX: 648, minY: 120, maxY: 204 }, // centered vertically
+      },
+    ],
     ballSpawnPoints,
     scoringTargets: [
+      // Red goal at red side midline (1/4 of field)
       {
         id: 'red-goal',
         name: 'Red Goal',
-        position: { x: 24, y: 162 },
+        position: { x: 162, y: 162 },
         radius: 24,
         alliance: 'red' as const,
         points: { auto: 4, teleop: 2 },
       },
+      // Blue goal at blue side midline (3/4 of field)
       {
         id: 'blue-goal',
         name: 'Blue Goal',
-        position: { x: 624, y: 162 },
+        position: { x: 486, y: 162 },
         radius: 24,
         alliance: 'blue' as const,
         points: { auto: 4, teleop: 2 },
       },
     ],
     startingPositions: {
+      // Red robots start at red side midline
       red: [
-        { x: 96, y: 100 },
-        { x: 96, y: 162 },
-        { x: 96, y: 224 },
+        { x: 162, y: 80 },
+        { x: 162, y: 162 },
+        { x: 162, y: 244 },
       ],
+      // Blue robots start at blue side midline
       blue: [
-        { x: 552, y: 100 },
-        { x: 552, y: 162 },
-        { x: 552, y: 224 },
+        { x: 486, y: 80 },
+        { x: 486, y: 162 },
+        { x: 486, y: 244 },
       ],
     },
   };
