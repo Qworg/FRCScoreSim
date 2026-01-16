@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "serve": "tsx scripts/serve-visualization.ts",
+    "demo": "tsx scripts/demo-final.ts"
   },
   "keywords": ["frc", "robot", "simulator", "pathfinding"],
   "author": "",

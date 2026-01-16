@@ -73,7 +73,7 @@ export { ScorerStrategy } from './strategy/builtin/ScorerStrategy.js';
 
 // Visualization
 export { VisualizationServer } from './visualization/WebSocketServer.js';
-export type { WSMessage, WSMessageType, ConfigMessage } from './visualization/WebSocketServer.js';
+export type { WSMessage, WSMessageType, ConfigMessage, ControlHandler } from './visualization/WebSocketServer.js';
 
 // Utilities
 export {

@@ -26,10 +26,8 @@ Run a complete match simulation as fast as possible without any visualization:
 
 ```bash
 # Run the demo simulation
-npx tsx scripts/demo-final.ts
-
-# Or use the programmatic API
-npx tsx -e "import { runDemo } from './src/index.js'; runDemo().then(r => console.log('Winner:', r.winner, 'Score:', r.score.red.total, '-', r.score.blue.total))"
+npm run demo
+# Or: npx tsx scripts/demo-final.ts
 ```
 
 **Output includes:**
@@ -38,7 +36,38 @@ npx tsx -e "import { runDemo } from './src/index.js'; runDemo().then(r => consol
 - Activity summary (pickups, shots, scores)
 - Key events timeline
 
-### Real-time Mode with WebSocket UI
+### Visual Mode (Browser UI)
+
+Run the simulation with a browser-based visualization:
+
+```bash
+npm run serve
+```
+
+Then open http://localhost:3000 in your browser.
+
+**Features:**
+- Real-time field visualization with robots and balls
+- Play/Pause/Step controls for simulation
+- Live scoreboard with breakdown
+- Match phase and time display
+- Event log
+
+**Controls:**
+| Button | Keyboard | Action |
+|--------|----------|--------|
+| Play | Space | Start simulation |
+| Pause | Space | Pause simulation |
+| Step | Right Arrow | Advance one tick |
+| Reset | Ctrl+R | Reset to new match |
+
+**Color Legend:**
+- **Red rectangles**: Red alliance robots
+- **Blue rectangles**: Blue alliance robots
+- **Yellow circles**: Balls
+- **Colored rings**: Scoring goals
+
+### Real-time Mode with WebSocket UI (Programmatic)
 
 Start the simulator with a WebSocket server for external visualization clients:
 

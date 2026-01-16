@@ -11,7 +11,7 @@ import { SimulationEvents } from '../simulation/EventBus.js';
 /**
  * WebSocket message types
  */
-export type WSMessageType = 'state' | 'event' | 'config' | 'ping' | 'pong';
+export type WSMessageType = 'state' | 'event' | 'config' | 'ping' | 'pong' | 'play' | 'pause' | 'step' | 'reset';
 
 /**
  * WebSocket message structure
@@ -19,8 +19,13 @@ export type WSMessageType = 'state' | 'event' | 'config' | 'ping' | 'pong';
 export interface WSMessage {
   type: WSMessageType;
   tick?: number;
-  data: unknown;
+  data?: unknown;
 }
+
+/**
+ * Control command handler
+ */
+export type ControlHandler = (command: 'play' | 'pause' | 'step' | 'reset') => void;
 
 /**
  * Configuration message data
@@ -39,9 +44,17 @@ export class VisualizationServer {
   private engine: SimulationEngine | null = null;
   private port: number;
   private unsubscribers: (() => void)[] = [];
+  private controlHandler: ControlHandler | null = null;
 
   constructor(port: number = 8080) {
     this.port = port;
+  }
+
+  /**
+   * Set a handler for control commands (play, pause, step, reset)
+   */
+  onControl(handler: ControlHandler): void {
+    this.controlHandler = handler;
   }
 
   /**
@@ -156,6 +169,14 @@ export class VisualizationServer {
     switch (message.type) {
       case 'ping':
         this.send(ws, { type: 'pong', data: null });
+        break;
+      case 'play':
+      case 'pause':
+      case 'step':
+      case 'reset':
+        if (this.controlHandler) {
+          this.controlHandler(message.type);
+        }
         break;
       default:
         // Ignore unknown messages
