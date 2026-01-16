@@ -99,16 +99,49 @@ export abstract class BaseStrategy implements Strategy {
   }
 
   /**
-   * Create a climb decision
+   * Create an auto climb decision
+   */
+  protected autoClimb(
+    priority: StrategyPriority,
+    reason: string
+  ): StrategyDecision {
+    return {
+      command: {
+        type: RobotActionType.CLIMBING,
+        isAutoClimb: true,
+      },
+      priority,
+      reason,
+    };
+  }
+
+  /**
+   * Create an endgame climb decision with specific level
+   */
+  protected endgameClimb(
+    level: number,
+    priority: StrategyPriority,
+    reason: string
+  ): StrategyDecision {
+    return {
+      command: {
+        type: RobotActionType.CLIMBING,
+        targetClimbLevel: level,
+        isAutoClimb: false,
+      },
+      priority,
+      reason,
+    };
+  }
+
+  /**
+   * @deprecated Use autoClimb() or endgameClimb(level) instead
+   * Create a climb decision (legacy method)
    */
   protected climb(
     priority: StrategyPriority,
     reason: string
   ): StrategyDecision {
-    return {
-      command: { type: RobotActionType.CLIMBING },
-      priority,
-      reason,
-    };
+    return this.endgameClimb(1, priority, reason);
   }
 }

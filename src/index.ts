@@ -173,19 +173,37 @@ export async function runRealtimeMatch(
  * Quick demo - create a match with default robots
  */
 export function createDemoSetup(): MatchSetup {
+  // Generate ball spawn points spread across the field
+  const ballSpawnPoints = [];
+  let ballId = 1;
+
+  // Center line balls (neutral)
+  for (let y = 54; y <= 270; y += 54) {
+    ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x: 324, y }, alliance: null });
+  }
+
+  // Red side balls (closer to red goal)
+  for (let x = 150; x <= 250; x += 50) {
+    for (let y = 81; y <= 243; y += 81) {
+      ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x, y }, alliance: null });
+    }
+  }
+
+  // Blue side balls (closer to blue goal)
+  for (let x = 398; x <= 498; x += 50) {
+    for (let y = 81; y <= 243; y += 81) {
+      ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x, y }, alliance: null });
+    }
+  }
+
   const fieldConfig = {
     name: 'Demo Field',
-    year: 2024,
+    year: 2025,
     width: 648,
     height: 324,
     cellSize: 1,
     zones: [],
-    ballSpawnPoints: [
-      { id: 'ball-1', position: { x: 200, y: 162 }, alliance: null },
-      { id: 'ball-2', position: { x: 324, y: 100 }, alliance: null },
-      { id: 'ball-3', position: { x: 324, y: 224 }, alliance: null },
-      { id: 'ball-4', position: { x: 448, y: 162 }, alliance: null },
-    ],
+    ballSpawnPoints,
     scoringTargets: [
       {
         id: 'red-goal',
@@ -218,15 +236,27 @@ export function createDemoSetup(): MatchSetup {
     },
   };
 
-  const robotConfig = createDefaultRobotConfig(1, 'Demo Robot');
+  const baseConfig = createDefaultRobotConfig(1, 'Demo Robot');
+
+  // Red alliance robots with varied climb capabilities
+  const red1 = { ...baseConfig, id: 'red-1', autoClimb: true, climbLevel: 3, climbUpTime: 2.5 };
+  const red2 = { ...baseConfig, id: 'red-2', autoClimb: false, climbLevel: 2, climbUpTime: 3.0 };
+  const red3 = { ...baseConfig, id: 'red-3', autoClimb: true, climbLevel: 2, climbUpTime: 3.0 };
+
+  // Blue alliance robots with varied climb capabilities
+  const blue1 = { ...baseConfig, id: 'blue-1', autoClimb: true, climbLevel: 3, climbUpTime: 2.5 };
+  const blue2 = { ...baseConfig, id: 'blue-2', autoClimb: false, climbLevel: 1, climbUpTime: 2.0 };
+  const blue3 = { ...baseConfig, id: 'blue-3', autoClimb: false, climbLevel: 3, climbUpTime: 3.5 };
 
   return {
     field: fieldConfig,
     robots: [
-      { config: { ...robotConfig, id: 'red-1' }, alliance: 'red', strategy: 'scorer' },
-      { config: { ...robotConfig, id: 'red-2' }, alliance: 'red', strategy: 'collector' },
-      { config: { ...robotConfig, id: 'blue-1' }, alliance: 'blue', strategy: 'scorer' },
-      { config: { ...robotConfig, id: 'blue-2' }, alliance: 'blue', strategy: 'collector' },
+      { config: red1, alliance: 'red', strategy: 'scorer' },
+      { config: red2, alliance: 'red', strategy: 'collector' },
+      { config: red3, alliance: 'red', strategy: 'scorer' },
+      { config: blue1, alliance: 'blue', strategy: 'scorer' },
+      { config: blue2, alliance: 'blue', strategy: 'collector' },
+      { config: blue3, alliance: 'blue', strategy: 'scorer' },
     ],
     simulation: DEFAULT_SIMULATION_CONFIG,
   };

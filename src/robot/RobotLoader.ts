@@ -70,6 +70,18 @@ export function parseRobotMarkdown(content: string): RobotConfig {
   const canClimb = parseBooleanValue(
     getOptionalValue(capabilitiesSection, 'can_climb', 'no')
   );
+  const autoClimb = parseBooleanValue(
+    getOptionalValue(capabilitiesSection, 'auto_climb', 'no')
+  );
+  const climbLevel = parseNumericValue(
+    getOptionalValue(capabilitiesSection, 'climb_level', '1')
+  );
+  const climbUpTime = parseNumericValue(
+    getOptionalValue(capabilitiesSection, 'climb_up_time', '3.0')
+  );
+  const climbDownTime = parseNumericValue(
+    getOptionalValue(capabilitiesSection, 'climb_down_time', '2.0')
+  );
   const canPass = parseBooleanValue(
     getOptionalValue(capabilitiesSection, 'can_pass', 'no')
   );
@@ -105,6 +117,10 @@ export function parseRobotMarkdown(content: string): RobotConfig {
     pickupTime,
     shootTime,
     canClimb,
+    autoClimb,
+    climbLevel: Math.max(1, Math.min(3, climbLevel)), // Clamp to 1-3
+    climbUpTime,
+    climbDownTime,
     canPass,
     defaultStrategy,
   };
@@ -141,6 +157,10 @@ export function createDefaultRobotConfig(
     pickupTime: 0.5,
     shootTime: 0.3,
     canClimb: true,
+    autoClimb: false,
+    climbLevel: 2,
+    climbUpTime: 3.0,
+    climbDownTime: 2.0,
     canPass: false,
     defaultStrategy: 'scorer',
   };
@@ -178,6 +198,18 @@ export function validateRobotConfig(config: RobotConfig): string[] {
 
   if (config.ballCapacity < 1) {
     errors.push('Ball capacity must be at least 1');
+  }
+
+  if (config.climbLevel < 1 || config.climbLevel > 3) {
+    errors.push('Climb level must be between 1 and 3');
+  }
+
+  if (config.climbUpTime <= 0) {
+    errors.push('Climb up time must be positive');
+  }
+
+  if (config.climbDownTime <= 0) {
+    errors.push('Climb down time must be positive');
   }
 
   return errors;

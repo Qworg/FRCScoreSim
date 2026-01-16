@@ -1,11 +1,21 @@
 import type {
   AllianceScore,
   GameRules,
+  RankingPoints,
   Score,
   ShiftParity,
   ScoringTarget,
 } from '../types/index.js';
 import { MatchPhase, DEFAULT_SIMULATION_CONFIG } from '../types/index.js';
+
+/**
+ * Result of attempting a climb
+ */
+export interface ClimbResult {
+  success: boolean;
+  points: number;
+  reason?: string;
+}
 
 /**
  * Default game rules
@@ -24,6 +34,24 @@ export function createAllianceScore(): AllianceScore {
     total: 0,
     breakdown: {},
     autoBallCount: 0,
+    totalBallCount: 0,
+    autoClimbCount: 0,
+    endgameClimbCount: 0,
+    endgameClimbLevelTotal: 0,
+  };
+}
+
+/**
+ * Create empty ranking points
+ */
+export function createRankingPoints(): RankingPoints {
+  return {
+    total: 0,
+    winRP: 0,
+    tieRP: 0,
+    balls100RP: 0,
+    balls360RP: 0,
+    climbRP: 0,
   };
 }
 
@@ -147,6 +175,9 @@ export class ScoringSystem {
       allianceScore.teleop += points;
     }
 
+    // Track total balls scored for RP calculation
+    allianceScore.totalBallCount++;
+
     // Update breakdown
     const targetKey = target.id;
     allianceScore.breakdown[targetKey] =
@@ -157,15 +188,85 @@ export class ScoringSystem {
   }
 
   /**
-   * Record a climb
+   * Check if an alliance can have another auto climber
+   */
+  canAutoClimb(alliance: 'red' | 'blue'): boolean {
+    return this.score[alliance].autoClimbCount < this.rules.maxAutoClimbers;
+  }
+
+  /**
+   * Check if an alliance can have another endgame climber
+   */
+  canEndgameClimb(alliance: 'red' | 'blue'): boolean {
+    return this.score[alliance].endgameClimbCount < this.rules.maxEndgameClimbers;
+  }
+
+  /**
+   * Record an auto climb (15 points, max 2 per alliance)
+   */
+  recordAutoClimb(alliance: 'red' | 'blue'): ClimbResult {
+    const allianceScore = this.score[alliance];
+
+    if (allianceScore.autoClimbCount >= this.rules.maxAutoClimbers) {
+      return {
+        success: false,
+        points: 0,
+        reason: `Max auto climbers (${this.rules.maxAutoClimbers}) already reached`,
+      };
+    }
+
+    const points = this.rules.autoClimbPoints;
+    allianceScore.auto += points;
+    allianceScore.autoClimbCount++;
+    allianceScore.breakdown['autoClimb'] =
+      (allianceScore.breakdown['autoClimb'] || 0) + points;
+    this.updateTotal(alliance);
+
+    return { success: true, points };
+  }
+
+  /**
+   * Record an endgame climb (10 points per level, max 3 per alliance)
+   */
+  recordEndgameClimb(alliance: 'red' | 'blue', level: number): ClimbResult {
+    const allianceScore = this.score[alliance];
+
+    if (level < 1 || level > 3) {
+      return {
+        success: false,
+        points: 0,
+        reason: `Invalid climb level: ${level} (must be 1-3)`,
+      };
+    }
+
+    if (allianceScore.endgameClimbCount >= this.rules.maxEndgameClimbers) {
+      return {
+        success: false,
+        points: 0,
+        reason: `Max endgame climbers (${this.rules.maxEndgameClimbers}) already reached`,
+      };
+    }
+
+    const points = this.rules.endgameClimbPointsPerLevel * level;
+    allianceScore.endgame += points;
+    allianceScore.endgameClimbCount++;
+    allianceScore.endgameClimbLevelTotal += level;
+    const levelKey = `endgameClimbL${level}`;
+    allianceScore.breakdown[levelKey] =
+      (allianceScore.breakdown[levelKey] || 0) + points;
+    this.updateTotal(alliance);
+
+    return { success: true, points };
+  }
+
+  /**
+   * @deprecated Use recordAutoClimb or recordEndgameClimb instead
+   * Record a climb (legacy method for backwards compatibility)
    */
   recordClimb(alliance: 'red' | 'blue'): number {
-    const points = this.rules.climbPoints;
-    this.score[alliance].endgame += points;
-    this.score[alliance].breakdown['climb'] =
-      (this.score[alliance].breakdown['climb'] || 0) + points;
-    this.updateTotal(alliance);
-    return points;
+    // Legacy behavior: record as endgame level 1 climb
+    const result = this.recordEndgameClimb(alliance, 1);
+    return result.points;
   }
 
   /**
@@ -228,6 +329,51 @@ export class ScoringSystem {
     this.redParity = null;
     this.blueParity = null;
     this.parityDetermined = false;
+  }
+
+  /**
+   * Calculate ranking points for an alliance
+   * RP conditions:
+   * - 100+ balls scored: 1 RP
+   * - 360+ balls scored: 1 RP
+   * - 50+ climbing points: 1 RP
+   * - Tied score: 1 RP
+   * - Win: 3 RP
+   */
+  calculateRankingPoints(alliance: 'red' | 'blue'): RankingPoints {
+    const rp = createRankingPoints();
+    const allianceScore = this.score[alliance];
+    const opponentScore = this.score[alliance === 'red' ? 'blue' : 'red'];
+
+    // Win RP (3 points)
+    if (allianceScore.total > opponentScore.total) {
+      rp.winRP = 3;
+    }
+
+    // Tie RP (1 point)
+    if (allianceScore.total === opponentScore.total) {
+      rp.tieRP = 1;
+    }
+
+    // 100+ balls scored RP (1 point)
+    if (allianceScore.totalBallCount >= 100) {
+      rp.balls100RP = 1;
+    }
+
+    // 360+ balls scored RP (1 point)
+    if (allianceScore.totalBallCount >= 360) {
+      rp.balls360RP = 1;
+    }
+
+    // 50+ climbing points RP (1 point)
+    if (allianceScore.endgame >= 50) {
+      rp.climbRP = 1;
+    }
+
+    // Calculate total
+    rp.total = rp.winRP + rp.tieRP + rp.balls100RP + rp.balls360RP + rp.climbRP;
+
+    return rp;
   }
 
   /**

@@ -31,6 +31,14 @@ export interface RobotConfig {
   shootTime: number;
   /** Whether robot can climb */
   canClimb: boolean;
+  /** Whether robot can auto-climb (climb during autonomous) */
+  autoClimb: boolean;
+  /** Maximum climb level (1-3) */
+  climbLevel: number;
+  /** Time to climb up in seconds */
+  climbUpTime: number;
+  /** Time to descend from climb in seconds */
+  climbDownTime: number;
   /** Whether robot can pass balls to teammates */
   canPass: boolean;
   /** Default strategy identifier */
@@ -63,6 +71,10 @@ export interface RobotAction {
   targetScoringZoneId?: string;
   /** Target robot ID for passing */
   targetRobotId?: string;
+  /** Target climb level (1-3) for climbing */
+  targetClimbLevel?: number;
+  /** Whether this is an auto climb (vs endgame climb) */
+  isAutoClimb?: boolean;
   /** Progress of current action (0.0 to 1.0) */
   progress: number;
   /** Time when action started (simulation tick) */
@@ -87,8 +99,12 @@ export interface RobotState {
   currentAction: RobotAction;
   /** Whether robot is disabled */
   disabled: boolean;
+  /** Whether robot climbed during auto */
+  hasAutoClimbed: boolean;
   /** Whether robot has climbed (endgame) */
   hasClimbed: boolean;
+  /** Current climb level achieved (null if not climbed) */
+  currentClimbLevel: number | null;
   /** Path being followed (grid positions) */
   currentPath: Position[];
   /** Index in current path */
@@ -104,4 +120,8 @@ export interface RobotCommand {
   targetBallId?: string;
   targetScoringZoneId?: string;
   targetRobotId?: string;
+  /** Target climb level (1-3) for climbing */
+  targetClimbLevel?: number;
+  /** Whether this is an auto climb (vs endgame climb) */
+  isAutoClimb?: boolean;
 }

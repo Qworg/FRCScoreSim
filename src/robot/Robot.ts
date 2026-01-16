@@ -31,7 +31,9 @@ export function createRobotState(
       startedAt: 0,
     },
     disabled: false,
+    hasAutoClimbed: false,
     hasClimbed: false,
+    currentClimbLevel: null,
     currentPath: [],
     pathIndex: 0,
   };
@@ -90,6 +92,14 @@ export class Robot {
 
   get hasClimbed(): boolean {
     return this.state.hasClimbed;
+  }
+
+  get hasAutoClimbed(): boolean {
+    return this.state.hasAutoClimbed;
+  }
+
+  get currentClimbLevel(): number | null {
+    return this.state.currentClimbLevel;
   }
 
   /**
@@ -259,11 +269,28 @@ export class Robot {
   }
 
   /**
-   * Mark robot as climbed
+   * Mark robot as climbed during auto
+   */
+  autoClimb(): void {
+    this.state.hasAutoClimbed = true;
+    this.state.velocity = 0;
+  }
+
+  /**
+   * Mark robot as climbed in endgame with a specific level
+   */
+  endgameClimb(level: number): void {
+    this.state.hasClimbed = true;
+    this.state.currentClimbLevel = level;
+    this.state.velocity = 0;
+  }
+
+  /**
+   * @deprecated Use autoClimb() or endgameClimb(level) instead
+   * Mark robot as climbed (legacy method)
    */
   climb(): void {
-    this.state.hasClimbed = true;
-    this.state.velocity = 0;
+    this.endgameClimb(1);
   }
 
   /**

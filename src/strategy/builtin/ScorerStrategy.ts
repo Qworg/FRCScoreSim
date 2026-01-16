@@ -27,8 +27,31 @@ export class ScorerStrategy extends BaseStrategy {
       canScore,
     } = context;
 
+    // In auto, try to auto-climb if robot can and alliance has slots
+    if (
+      phase === MatchPhase.AUTO &&
+      robot.config.autoClimb &&
+      !robot.hasAutoClimbed &&
+      context.allianceCanAutoClimb
+    ) {
+      // Shoot any remaining balls first (if we have them and in range)
+      if (robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
+        return this.shoot(
+          nearestScoringTarget.id,
+          StrategyPriority.HIGH,
+          'Auto - shooting balls before climb'
+        );
+      }
+      return this.autoClimb(StrategyPriority.CRITICAL, 'Auto - climbing (15 pts)');
+    }
+
     // In endgame, prioritize climbing
-    if (phase === MatchPhase.ENDGAME && robot.config.canClimb && !robot.hasClimbed) {
+    if (
+      phase === MatchPhase.ENDGAME &&
+      robot.config.canClimb &&
+      !robot.hasClimbed &&
+      context.allianceCanEndgameClimb
+    ) {
       // Shoot any remaining balls first (if we can score)
       if (canScore && robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
         return this.shoot(
@@ -38,8 +61,13 @@ export class ScorerStrategy extends BaseStrategy {
         );
       }
 
-      // Then climb
-      return this.climb(StrategyPriority.CRITICAL, 'Endgame - climbing');
+      // Then climb to robot's configured level
+      const level = robot.config.climbLevel;
+      return this.endgameClimb(
+        level,
+        StrategyPriority.CRITICAL,
+        `Endgame - climbing to L${level} (${level * 10} pts)`
+      );
     }
 
     // If we can score and have balls and in range, shoot!

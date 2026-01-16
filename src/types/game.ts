@@ -89,6 +89,32 @@ export interface AllianceScore {
   breakdown: Record<string, number>;
   /** Number of balls scored during auto (used to determine shift parity) */
   autoBallCount: number;
+  /** Total number of balls scored throughout the match */
+  totalBallCount: number;
+  /** Number of robots that climbed in auto */
+  autoClimbCount: number;
+  /** Number of robots that climbed in endgame */
+  endgameClimbCount: number;
+  /** Total climb level points in endgame (sum of all climb levels × points per level) */
+  endgameClimbLevelTotal: number;
+}
+
+/**
+ * Ranking Points breakdown for an alliance
+ */
+export interface RankingPoints {
+  /** Total ranking points earned */
+  total: number;
+  /** RP from winning the match (3 RP) */
+  winRP: number;
+  /** RP from tied score (1 RP) */
+  tieRP: number;
+  /** RP from scoring 100+ balls (1 RP) */
+  balls100RP: number;
+  /** RP from scoring 360+ balls (1 RP) */
+  balls360RP: number;
+  /** RP from 50+ climbing points (1 RP) */
+  climbRP: number;
 }
 
 /**
@@ -124,8 +150,14 @@ export interface PhaseTiming {
  */
 export interface GameRules {
   timing: PhaseTiming;
-  /** Points for climbing */
-  climbPoints: number;
+  /** Points for auto climb (flat rate per robot) */
+  autoClimbPoints: number;
+  /** Points per level for endgame climb (10 = 10/20/30 for levels 1/2/3) */
+  endgameClimbPointsPerLevel: number;
+  /** Maximum robots that can auto-climb per alliance */
+  maxAutoClimbers: number;
+  /** Maximum robots that can climb in endgame per alliance */
+  maxEndgameClimbers: number;
   /** Penalty points */
   penaltyPoints: number;
   /** Maximum balls on field */
@@ -170,6 +202,10 @@ export interface MatchResult {
   score: Score;
   /** Winner alliance or null for tie */
   winner: 'red' | 'blue' | null;
+  /** Ranking points for red alliance */
+  redRP: RankingPoints;
+  /** Ranking points for blue alliance */
+  blueRP: RankingPoints;
   /** All events from the match */
   events: GameEvent[];
   /** Match duration in ticks */

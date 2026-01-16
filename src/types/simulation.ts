@@ -82,7 +82,10 @@ export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
       shift4: 25,      // 25 seconds - EVEN alliance scores
       endgame: 30,     // 30 seconds endgame (all can score)
     },
-    climbPoints: 25,
+    autoClimbPoints: 15,           // 15 points per robot in auto
+    endgameClimbPointsPerLevel: 10, // 10 points per level (10/20/30 for L1/L2/L3)
+    maxAutoClimbers: 2,            // Max 2 robots can climb in auto
+    maxEndgameClimbers: 3,         // Max 3 robots can climb in endgame
     penaltyPoints: 3,
     maxBallsOnField: 11,
   },

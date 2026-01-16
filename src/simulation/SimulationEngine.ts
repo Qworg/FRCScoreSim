@@ -298,6 +298,22 @@ export class SimulationEngine {
     const allianceParity = robot.alliance === 'red' ? state.redParity : state.blueParity;
     const canScore = this.match.canAllianceScore(robot.alliance);
 
+    // Count alliance climbs
+    const allAllianceRobots = this.match.getRobotsByAlliance(robot.alliance);
+    const allianceAutoClimbCount = allAllianceRobots.filter(r => r.hasAutoClimbed).length;
+    const allianceEndgameClimbCount = allAllianceRobots.filter(r => r.hasClimbed).length;
+
+    // Check if robot can auto-climb
+    const canAutoClimb =
+      robot.config.autoClimb &&
+      !robot.hasAutoClimbed &&
+      this.match.clock.isAuto() &&
+      allianceAutoClimbCount < this.config.gameRules.maxAutoClimbers;
+
+    // Check if alliance has climb slots available
+    const allianceCanAutoClimb = allianceAutoClimbCount < this.config.gameRules.maxAutoClimbers;
+    const allianceCanEndgameClimb = allianceEndgameClimbCount < this.config.gameRules.maxEndgameClimbers;
+
     return {
       gameState: state,
       robot: robot.cloneState(),
@@ -317,6 +333,11 @@ export class SimulationEngine {
       currentShift: this.match.clock.currentShift,
       allianceParity,
       canScore,
+      canAutoClimb,
+      allianceCanAutoClimb,
+      allianceCanEndgameClimb,
+      allianceAutoClimbCount,
+      allianceEndgameClimbCount,
     };
   }
 
@@ -325,7 +346,14 @@ export class SimulationEngine {
    */
   private executeCommand(
     robot: Robot,
-    command: { type: RobotActionType; targetPosition?: Position; targetBallId?: string; targetScoringZoneId?: string }
+    command: {
+      type: RobotActionType;
+      targetPosition?: Position;
+      targetBallId?: string;
+      targetScoringZoneId?: string;
+      targetClimbLevel?: number;
+      isAutoClimb?: boolean;
+    }
   ): void {
     if (robot.isDisabled) return;
 
@@ -369,7 +397,12 @@ export class SimulationEngine {
         break;
 
       case RobotActionType.CLIMBING:
-        if (robot.config.canClimb && this.match.clock.isEndgame() && robot.isIdle()) {
+        // Auto climb: during AUTO phase, robot must have autoClimb capability
+        if (command.isAutoClimb && robot.config.autoClimb && this.match.clock.isAuto() && robot.isIdle()) {
+          robot.startAction(command, this.match.clock.tick);
+        }
+        // Endgame climb: during ENDGAME phase, robot must have canClimb capability
+        else if (!command.isAutoClimb && robot.config.canClimb && this.match.clock.isEndgame() && robot.isIdle()) {
           robot.startAction(command, this.match.clock.tick);
         }
         break;
@@ -525,13 +558,39 @@ export class SimulationEngine {
    * Update robot climbing action
    */
   private updateClimbingRobot(robot: Robot, deltaTime: number): void {
-    const climbTime = 3.0; // 3 seconds to climb
+    const isAutoClimb = robot.currentAction.isAutoClimb === true;
+    const climbTime = robot.config.climbUpTime;
     const progress = robot.currentAction.progress + deltaTime / climbTime;
     robot.updateProgress(progress);
 
     if (progress >= 1) {
-      robot.climb();
-      this.match.recordClimb(robot.id);
+      if (isAutoClimb) {
+        // Auto climb: mark as auto climbed and record score
+        robot.autoClimb();
+        const result = this.match.recordAutoClimb(robot.id);
+        if (result.success) {
+          this.events.emit(SimulationEvents.ROBOT_CLIMB_SUCCESS, {
+            robotId: robot.id,
+            type: 'auto',
+            points: result.points,
+          });
+        }
+        // After auto climb, robot descends and continues playing
+        // (hasAutoClimbed is set but hasClimbed is not, so robot can still move)
+      } else {
+        // Endgame climb: mark as climbed with level and record score
+        const level = robot.currentAction.targetClimbLevel ?? robot.config.climbLevel;
+        robot.endgameClimb(level);
+        const result = this.match.recordEndgameClimb(robot.id, level);
+        if (result.success) {
+          this.events.emit(SimulationEvents.ROBOT_CLIMB_SUCCESS, {
+            robotId: robot.id,
+            type: 'endgame',
+            level,
+            points: result.points,
+          });
+        }
+      }
       robot.completeAction();
     }
   }

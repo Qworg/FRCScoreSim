@@ -59,6 +59,34 @@ After AUTO ends, each alliance is assigned a **parity** based on autonomous perf
 - Robots automatically respect scoring windows - they will collect balls during off-shifts and shoot when allowed
 - TRANSITION and ENDGAME are open scoring periods for both alliances
 
+### Climbing Rules
+
+Robots can climb during two phases for points:
+
+**AUTO Climb (15 points per robot)**
+- Robots with `autoClimb: true` can climb during the AUTO phase
+- Maximum **2 robots per alliance** can auto-climb
+- After climbing, robot descends and continues playing normally
+- Great for early point advantage
+
+**ENDGAME Climb (10 points × level)**
+- All robots with `canClimb: true` can climb in ENDGAME
+- Maximum **3 robots per alliance** can climb
+- Points based on climb level achieved:
+  - Level 1: 10 points
+  - Level 2: 20 points
+  - Level 3: 30 points
+- Robot's `climbLevel` config determines max level it can reach
+
+**Robot Climbing Configuration**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `canClimb` | boolean | Whether robot can climb in endgame |
+| `autoClimb` | boolean | Whether robot can climb during AUTO |
+| `climbLevel` | 1-3 | Maximum climb level robot can achieve |
+| `climbUpTime` | seconds | Time to complete climb |
+| `climbDownTime` | seconds | Time to descend (after auto climb) |
+
 ## Installation
 
 ```bash
@@ -382,6 +410,10 @@ A versatile robot designed for ball collection and scoring.
 - Pickup Time: 0.5 seconds
 - Shoot Time: 0.3 seconds
 - Can Climb: yes
+- Auto Climb: yes
+- Climb Level: 3
+- Climb Up Time: 2.5 seconds
+- Climb Down Time: 2.0 seconds
 - Can Pass: yes
 
 ## Default Strategy
@@ -402,7 +434,7 @@ const robotConfig = await loadRobotFromFile('data/robots/my-robot.md');
 | `width` | Robot width in inches | 28 |
 | `length` | Robot length in inches | 32 |
 | `height` | Robot height in inches | 45 |
-| `topSpeed` | Maximum speed (in/s) | 120 |
+| `topSpeed` | Maximum speed (in/s) | 150 |
 | `acceleration` | Acceleration rate (in/s²) | 100 |
 | `turnRate` | Turn speed (deg/s) | 180 |
 | `shootingRange` | Max shooting distance (in) | 240 |
@@ -411,7 +443,11 @@ const robotConfig = await loadRobotFromFile('data/robots/my-robot.md');
 | `pickupTime` | Seconds to pick up ball | 0.5 |
 | `shootTime` | Seconds to shoot ball | 0.3 |
 | `canClimb` | Can climb in endgame | true |
-| `canPass` | Can pass to teammates | true |
+| `autoClimb` | Can climb during AUTO (15 pts) | false |
+| `climbLevel` | Max climb level (1-3) | 2 |
+| `climbUpTime` | Seconds to climb up | 3.0 |
+| `climbDownTime` | Seconds to descend | 2.0 |
+| `canPass` | Can pass to teammates | false |
 
 ### Creating a Custom Strategy
 

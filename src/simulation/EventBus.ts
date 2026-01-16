@@ -110,6 +110,7 @@ export const SimulationEvents = {
   BALL_SHOT: 'ball_shot',
   ROBOT_ARRIVED: 'robot_arrived',
   ROBOT_COLLISION: 'robot_collision',
+  ROBOT_CLIMB_SUCCESS: 'robot_climb_success',
   MATCH_START: 'match_start',
   MATCH_END: 'match_end',
   STATE_UPDATE: 'state_update',

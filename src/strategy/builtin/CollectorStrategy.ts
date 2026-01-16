@@ -14,9 +14,29 @@ export class CollectorStrategy extends BaseStrategy {
   decide(context: StrategyContext): StrategyDecision {
     const { robot, nearestBall, nearestBallDistance, phase, canScore } = context;
 
+    // In auto, try to auto-climb if robot can and alliance has slots
+    if (
+      phase === MatchPhase.AUTO &&
+      robot.config.autoClimb &&
+      !robot.hasAutoClimbed &&
+      context.allianceCanAutoClimb
+    ) {
+      return this.autoClimb(StrategyPriority.HIGH, 'Auto - attempting to climb (15 pts)');
+    }
+
     // In endgame, try to climb if we can
-    if (phase === MatchPhase.ENDGAME && robot.config.canClimb && !robot.hasClimbed) {
-      return this.climb(StrategyPriority.HIGH, 'Endgame - attempting to climb');
+    if (
+      phase === MatchPhase.ENDGAME &&
+      robot.config.canClimb &&
+      !robot.hasClimbed &&
+      context.allianceCanEndgameClimb
+    ) {
+      const level = robot.config.climbLevel;
+      return this.endgameClimb(
+        level,
+        StrategyPriority.HIGH,
+        `Endgame - climbing to L${level} (${level * 10} pts)`
+      );
     }
 
     // If at capacity, find a teammate to pass to or go to scoring zone

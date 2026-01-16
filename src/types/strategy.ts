@@ -43,6 +43,16 @@ export interface StrategyContext {
   allianceParity: ShiftParity | null;
   /** Whether this alliance can score during the current phase */
   canScore: boolean;
+  /** Whether this robot can auto-climb (config + hasn't already) */
+  canAutoClimb: boolean;
+  /** Whether the alliance has auto-climb slots available */
+  allianceCanAutoClimb: boolean;
+  /** Whether the alliance has endgame climb slots available */
+  allianceCanEndgameClimb: boolean;
+  /** Number of alliance robots that have auto-climbed */
+  allianceAutoClimbCount: number;
+  /** Number of alliance robots that have endgame-climbed */
+  allianceEndgameClimbCount: number;
 }
 
 /**

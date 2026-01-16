@@ -155,21 +155,54 @@ export class Match {
   }
 
   /**
-   * Record a climb
+   * Record an auto climb (15 points)
+   */
+  recordAutoClimb(robotId: string): { success: boolean; points: number } {
+    const robot = this.getRobot(robotId);
+    if (!robot) return { success: false, points: 0 };
+
+    const result = this.scoring.recordAutoClimb(robot.alliance);
+
+    if (result.success) {
+      this.addEvent(GameEventType.ROBOT_CLIMB_SUCCESS, {
+        robotId,
+        alliance: robot.alliance,
+        points: result.points,
+        details: { type: 'auto' },
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Record an endgame climb (10 points per level)
+   */
+  recordEndgameClimb(robotId: string, level: number): { success: boolean; points: number } {
+    const robot = this.getRobot(robotId);
+    if (!robot) return { success: false, points: 0 };
+
+    const result = this.scoring.recordEndgameClimb(robot.alliance, level);
+
+    if (result.success) {
+      this.addEvent(GameEventType.ROBOT_CLIMB_SUCCESS, {
+        robotId,
+        alliance: robot.alliance,
+        points: result.points,
+        details: { type: 'endgame', level },
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * @deprecated Use recordAutoClimb or recordEndgameClimb instead
+   * Record a climb (legacy method)
    */
   recordClimb(robotId: string): number {
-    const robot = this.getRobot(robotId);
-    if (!robot) return 0;
-
-    const points = this.scoring.recordClimb(robot.alliance);
-
-    this.addEvent(GameEventType.ROBOT_CLIMB_SUCCESS, {
-      robotId,
-      alliance: robot.alliance,
-      points,
-    });
-
-    return points;
+    const result = this.recordEndgameClimb(robotId, 1);
+    return result.points;
   }
 
   /**
@@ -306,6 +339,8 @@ export class Match {
     return {
       score: this.scoring.cloneScore(),
       winner: this.scoring.getWinner(),
+      redRP: this.scoring.calculateRankingPoints('red'),
+      blueRP: this.scoring.calculateRankingPoints('blue'),
       events: [...this.events],
       totalTicks: this.clock.tick,
       totalTime: this.clock.elapsedTime,

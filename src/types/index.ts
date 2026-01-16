@@ -38,6 +38,7 @@ export type {
   GameState,
   MatchResult,
   ShiftParity,
+  RankingPoints,
 } from './game.js';
 export { MatchPhase, GameEventType } from './game.js';
 
