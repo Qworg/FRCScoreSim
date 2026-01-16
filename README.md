@@ -2,6 +2,20 @@
 
 A TypeScript-based FRC (FIRST Robotics Competition) robot match simulator with configurable fields, robot characteristics, A* pathfinding, and strategy/AI systems.
 
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Run with browser visualization
+npm run serve
+# Then open http://localhost:3000
+
+# Or run headless (no UI, fast)
+npm run demo
+```
+
 ## Features
 
 - **Field System**: Configurable field grid with zones, obstacles, and scoring targets
@@ -46,26 +60,34 @@ npm run serve
 
 Then open http://localhost:3000 in your browser.
 
+The visualization shows:
+- A green field (648x324 inches, actual FRC field size)
+- Red and blue robot rectangles moving around the field
+- Yellow balls that robots collect and shoot
+- Scoring goals at each end of the field
+- Real-time score updates as robots score
+
 **Features:**
 - Real-time field visualization with robots and balls
 - Play/Pause/Step controls for simulation
-- Live scoreboard with breakdown
+- Live scoreboard with breakdown (Auto/Teleop/Endgame points)
 - Match phase and time display
-- Event log
+- Event log showing pickups, shots, and scores
 
 **Controls:**
 | Button | Keyboard | Action |
 |--------|----------|--------|
-| Play | Space | Start simulation |
+| Play | Space | Start simulation at 60 FPS |
 | Pause | Space | Pause simulation |
-| Step | Right Arrow | Advance one tick |
+| Step | Right Arrow | Advance single tick (1/60th second) |
 | Reset | Ctrl+R | Reset to new match |
 
 **Color Legend:**
-- **Red rectangles**: Red alliance robots
-- **Blue rectangles**: Blue alliance robots
-- **Yellow circles**: Balls
-- **Colored rings**: Scoring goals
+- **Red rectangles**: Red alliance robots (number shows robot ID)
+- **Blue rectangles**: Blue alliance robots (number shows robot ID)
+- **Yellow circles**: Balls on the field
+- **Yellow badge on robot**: Number of balls robot is holding
+- **Red/Blue rings**: Scoring goals for each alliance
 
 ### Real-time Mode with WebSocket UI (Programmatic)
 
