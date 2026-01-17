@@ -62,6 +62,57 @@ export function updateBallPhysics(
 }
 
 /**
+ * Handle wall bouncing for a ball, keeping it fully inside the field
+ * Returns the corrected position and velocity after any wall bounces
+ */
+function handleWallBounce(
+  pos: Position,
+  vx: number,
+  vy: number,
+  field: Field,
+  radius: number,
+  bounceFactor: number = 0.7
+): { pos: Position; vx: number; vy: number } {
+  const minX = radius;
+  const maxX = field.config.width - radius;
+  const minY = radius;
+  const maxY = field.config.height - radius;
+
+  let newX = pos.x;
+  let newY = pos.y;
+  let newVx = vx;
+  let newVy = vy;
+
+  // Bounce off left wall
+  if (newX < minX) {
+    newX = minX + (minX - newX);
+    newVx = -newVx * bounceFactor;
+  }
+  // Bounce off right wall
+  else if (newX > maxX) {
+    newX = maxX - (newX - maxX);
+    newVx = -newVx * bounceFactor;
+  }
+
+  // Bounce off bottom wall
+  if (newY < minY) {
+    newY = minY + (minY - newY);
+    newVy = -newVy * bounceFactor;
+  }
+  // Bounce off top wall
+  else if (newY > maxY) {
+    newY = maxY - (newY - maxY);
+    newVy = -newVy * bounceFactor;
+  }
+
+  // Clamp to ensure ball stays in bounds after bounce calculation
+  newX = Math.max(minX, Math.min(maxX, newX));
+  newY = Math.max(minY, Math.min(maxY, newY));
+
+  return { pos: { x: newX, y: newY }, vx: newVx, vy: newVy };
+}
+
+/**
  * Update physics for a ball in flight
  */
 function updateFlightPhysics(
@@ -84,22 +135,55 @@ function updateFlightPhysics(
   const newVz = velocity.vz - config.gravity * deltaTime;
 
   // Apply air resistance
-  const newVx = velocity.vx * Math.pow(config.airResistance, deltaTime);
-  const newVy = velocity.vy * Math.pow(config.airResistance, deltaTime);
+  let newVx = velocity.vx * Math.pow(config.airResistance, deltaTime);
+  let newVy = velocity.vy * Math.pow(config.airResistance, deltaTime);
 
   // Update position
-  const newPos: Position = {
+  let newPos: Position = {
     x: ball.position.x + newVx * deltaTime,
     y: ball.position.y + newVy * deltaTime,
   };
   const newHeight = ball.height + velocity.vz * deltaTime - 0.5 * config.gravity * deltaTime * deltaTime;
+
+  // Check for ball-blocking zones (scoring areas block balls)
+  // Pass the shot origin position so we can check if ball is from proper third
+  const blockResult = checkBallBlocking(ball.position, newPos, field, ball.data.shotFromPosition);
+  if (blockResult) {
+    if (blockResult.shouldBounce) {
+      // Ball bounces off the scoring zone wall
+      const bounceFactor = 0.6;
+
+      // Reflect velocity based on normal
+      if (blockResult.normalX !== 0) {
+        newVx = -newVx * bounceFactor;
+      }
+      if (blockResult.normalY !== 0) {
+        newVy = -newVy * bounceFactor;
+      }
+
+      // Update position to the blocking point
+      newPos = blockResult.position;
+
+      // Continue flight with bounced velocity (don't land)
+      ball.setPosition(newPos);
+      ball.setVelocity({ vx: newVx, vy: newVy, vz: newVz });
+
+      return result; // Ball continues in flight
+    } else {
+      // Ball is blocked - stop it at the blocking point and land
+      ball.land(blockResult.position, tick);
+      ball.setVelocity({ vx: 0, vy: 0, vz: 0 });
+      return { ...result, landed: true };
+    }
+  }
 
   // Check for scoring
   const scoringCheck = checkScoring(
     ball,
     newPos,
     newHeight,
-    field.config.scoringTargets
+    field.config.scoringTargets,
+    field
   );
   if (scoringCheck.scored) {
     ball.score(tick);
@@ -111,21 +195,41 @@ function updateFlightPhysics(
     };
   }
 
-  // Check if ball hit ground
-  if (newHeight <= 0) {
-    ball.land(newPos, tick);
+  // Handle wall bouncing (ball stays in play, bounces off walls)
+  const bounceResult = handleWallBounce(newPos, newVx, newVy, field, config.radius, 0.7);
+  newPos = bounceResult.pos;
+  newVx = bounceResult.vx;
+  newVy = bounceResult.vy;
+
+  // Check for ramp collision - balls hitting ramps climb up
+  const rampHeight = field.getRampHeightAtPosition(newPos);
+  if (rampHeight > 0 && newHeight <= rampHeight) {
+    // Ball hits the ramp - it rolls up the ramp surface
+    // Apply velocity reduction as ball climbs (energy lost to climbing)
+    const climbFactor = 0.7; // Ball loses 30% velocity when hitting ramp
+    newVx *= climbFactor;
+    newVy *= climbFactor;
+
+    // Ball follows ramp surface (height matches ramp)
+    ball.land(newPos, tick, rampHeight);
+    ball.setVelocity({
+      vx: newVx,
+      vy: newVy,
+      vz: 0,
+    });
+    return { ...result, landed: true };
+  }
+
+  // Check if ball hit ground (accounting for ramp height)
+  const groundHeight = rampHeight;
+  if (newHeight <= groundHeight) {
+    ball.land(newPos, tick, groundHeight);
     ball.setVelocity({
       vx: newVx * 0.3, // Bounce reduces velocity
       vy: newVy * 0.3,
       vz: 0,
     });
     return { ...result, landed: true };
-  }
-
-  // Check for out of bounds
-  if (!field.isPositionInBounds(newPos)) {
-    ball.outOfBounds(tick);
-    return { ...result, outOfBounds: true };
   }
 
   // Update ball state
@@ -143,7 +247,7 @@ function updateGroundPhysics(
   ball: Ball,
   field: Field,
   deltaTime: number,
-  tick: number,
+  _tick: number,
   config: BallPhysicsConfig
 ): BallUpdateResult {
   const result: BallUpdateResult = {
@@ -164,22 +268,44 @@ function updateGroundPhysics(
 
   // Apply ground friction
   const friction = Math.pow(config.groundFriction, deltaTime);
-  const newVx = velocity.vx * friction;
-  const newVy = velocity.vy * friction;
+  let newVx = velocity.vx * friction;
+  let newVy = velocity.vy * friction;
 
   // Update position
-  const newPos: Position = {
+  let newPos: Position = {
     x: ball.position.x + newVx * deltaTime,
     y: ball.position.y + newVy * deltaTime,
   };
 
-  // Check for out of bounds
-  if (!field.isPositionInBounds(newPos)) {
-    ball.outOfBounds(tick);
-    return { ...result, outOfBounds: true };
+  // Handle wall bouncing (ball stays in play, bounces off walls)
+  const bounceResult = handleWallBounce(newPos, newVx, newVy, field, config.radius, 0.5);
+  newPos = bounceResult.pos;
+  newVx = bounceResult.vx;
+  newVy = bounceResult.vy;
+
+  // Handle ramp physics - ball follows ramp surface
+  const currentRampHeight = field.getRampHeightAtPosition(ball.position);
+  const newRampHeight = field.getRampHeightAtPosition(newPos);
+
+  // Calculate height change from moving across ramp
+  const heightChange = newRampHeight - currentRampHeight;
+
+  if (heightChange > 0) {
+    // Ball is climbing the ramp - apply velocity reduction proportional to climb
+    // Energy lost to potential energy: KE = 0.5mv² -> PE = mgh
+    // v_new = sqrt(v² - 2gh) simplified with gravity factor
+    const climbPenalty = Math.sqrt(Math.max(0, 1 - (heightChange * 0.02)));
+    newVx *= climbPenalty;
+    newVy *= climbPenalty;
+  } else if (heightChange < 0) {
+    // Ball is rolling down the ramp - gains speed (up to a limit)
+    const downhillBoost = Math.min(1.15, 1 + Math.abs(heightChange) * 0.01);
+    newVx *= downhillBoost;
+    newVy *= downhillBoost;
   }
 
   ball.setPosition(newPos);
+  ball.setHeight(newRampHeight); // Ball follows ramp surface
   ball.setVelocity({ vx: newVx, vy: newVy, vz: 0 });
 
   return result;
@@ -192,9 +318,15 @@ function checkScoring(
   ball: Ball,
   position: Position,
   height: number,
-  targets: ScoringTarget[]
+  targets: ScoringTarget[],
+  field: Field
 ): { scored: boolean; targetId: string | null } {
   if (!ball.data.shotByRobotId) {
+    return { scored: false, targetId: null };
+  }
+
+  // Check if shot originated from a no-score zone
+  if (ball.data.shotFromPosition && field.isInNoScoreZone(ball.data.shotFromPosition)) {
     return { scored: false, targetId: null };
   }
 
@@ -212,6 +344,87 @@ function checkScoring(
   }
 
   return { scored: false, targetId: null };
+}
+
+/**
+ * Check if ball path intersects a ball-blocking zone
+ * Returns blocking info if blocked, null otherwise
+ */
+interface BlockingResult {
+  /** Position just before blocking zone */
+  position: Position;
+  /** Whether this is a bounce (vs stop) */
+  shouldBounce: boolean;
+  /** Approximate normal direction (for bounce calculation) */
+  normalX: number;
+  normalY: number;
+}
+
+function checkBallBlocking(
+  fromPos: Position,
+  toPos: Position,
+  field: Field,
+  shotOriginPos: Position | null,
+  steps: number = 10
+): BlockingResult | null {
+  const fieldWidth = field.config.width;
+  const leftThirdBoundary = fieldWidth / 3;
+  const rightThirdBoundary = (fieldWidth * 2) / 3;
+
+  // Determine if shot is from left or right third (allowed to pass through their side's scoring zone)
+  const isFromLeftThird = shotOriginPos ? shotOriginPos.x < leftThirdBoundary : false;
+  const isFromRightThird = shotOriginPos ? shotOriginPos.x > rightThirdBoundary : false;
+  const shotFromNoScoreZone = shotOriginPos ? field.isInNoScoreZone(shotOriginPos) : false;
+
+  // Check intermediate points along the path
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const checkPos: Position = {
+      x: fromPos.x + (toPos.x - fromPos.x) * t,
+      y: fromPos.y + (toPos.y - fromPos.y) * t,
+    };
+    if (field.isInBallBlockingZone(checkPos)) {
+      // Check if this blocking zone is on the same side as the shot origin
+      const zoneIsOnLeftSide = checkPos.x < fieldWidth / 2;
+
+      // Allow balls from proper third to pass through their side's scoring zone
+      const isAllowed = (isFromLeftThird && zoneIsOnLeftSide) ||
+                        (isFromRightThird && !zoneIsOnLeftSide);
+
+      if (isAllowed) {
+        // Ball is allowed to pass through - continue checking
+        continue;
+      }
+
+      // Return the last valid position before the blocking zone
+      const prevT = (i - 1) / steps;
+      const blockPos = {
+        x: fromPos.x + (toPos.x - fromPos.x) * prevT,
+        y: fromPos.y + (toPos.y - fromPos.y) * prevT,
+      };
+
+      // Calculate approximate normal by finding which edge we hit
+      const dx = toPos.x - fromPos.x;
+      const dy = toPos.y - fromPos.y;
+      let normalX = 0;
+      let normalY = 0;
+
+      // Check if we're hitting from left/right or top/bottom
+      if (Math.abs(dx) > Math.abs(dy)) {
+        normalX = dx > 0 ? -1 : 1;
+      } else {
+        normalY = dy > 0 ? -1 : 1;
+      }
+
+      return {
+        position: blockPos,
+        shouldBounce: shotFromNoScoreZone, // Balls from no-score zone bounce
+        normalX,
+        normalY,
+      };
+    }
+  }
+  return null;
 }
 
 /**

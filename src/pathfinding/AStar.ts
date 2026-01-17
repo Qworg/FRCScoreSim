@@ -22,6 +22,8 @@ export interface PathfindingOptions {
   maxIterations: number;
   /** Robot height for traversability checks */
   robotHeight: number;
+  /** Robot width for collision buffer */
+  robotWidth: number;
   /** Cost calculation options */
   costOptions: CostOptions;
   /** Whether to smooth the resulting path */
@@ -34,6 +36,7 @@ export interface PathfindingOptions {
 export const DEFAULT_PATHFINDING_OPTIONS: PathfindingOptions = {
   maxIterations: 10000,
   robotHeight: 45,
+  robotWidth: 28,
   costOptions: DEFAULT_COST_OPTIONS,
   smoothPath: true,
 };
@@ -58,6 +61,7 @@ export interface PathResult {
 export class AStar {
   private field: Field;
   private options: PathfindingOptions;
+  private dynamicObstacles: Set<string> = new Set();
 
   constructor(
     field: Field,
@@ -68,14 +72,117 @@ export class AStar {
   }
 
   /**
+   * Set dynamic obstacles (other robot positions) to avoid
+   * @param positions Array of robot positions
+   * @param radius Default radius for opponent robots (default: 18 inches)
+   */
+  setDynamicObstacles(positions: Position[], radius: number = 18): void {
+    this.dynamicObstacles.clear();
+    for (const pos of positions) {
+      this.addDynamicObstacle(pos, radius);
+    }
+  }
+
+  /**
+   * Set dynamic obstacles with different radii for friendly vs opponent robots
+   * @param friendlyPositions Positions of friendly robots (larger bubble)
+   * @param opponentPositions Positions of opponent robots
+   * @param friendlyRadius Radius for friendly robots (default: 36 inches - larger to avoid collisions)
+   * @param opponentRadius Radius for opponent robots (default: 24 inches)
+   */
+  setDynamicObstaclesWithAlliances(
+    friendlyPositions: Position[],
+    opponentPositions: Position[],
+    friendlyRadius: number = 36,
+    opponentRadius: number = 24
+  ): void {
+    this.dynamicObstacles.clear();
+
+    // Add friendly robots with larger bubble
+    for (const pos of friendlyPositions) {
+      this.addDynamicObstacle(pos, friendlyRadius);
+    }
+
+    // Add opponent robots with standard bubble
+    for (const pos of opponentPositions) {
+      this.addDynamicObstacle(pos, opponentRadius);
+    }
+  }
+
+  /**
+   * Add a single dynamic obstacle at a position
+   */
+  private addDynamicObstacle(pos: Position, radius: number): void {
+    const gridPos = this.field.positionToGrid(pos);
+    const cellRadius = Math.ceil(radius / this.field.config.cellSize);
+    for (let dr = -cellRadius; dr <= cellRadius; dr++) {
+      for (let dc = -cellRadius; dc <= cellRadius; dc++) {
+        const checkPos = { row: gridPos.row + dr, col: gridPos.col + dc };
+        if (this.field.isInBounds(checkPos)) {
+          const dist = Math.sqrt(dr * dr + dc * dc) * this.field.config.cellSize;
+          if (dist <= radius) {
+            this.dynamicObstacles.add(positionKey(checkPos));
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Clear dynamic obstacles
+   */
+  clearDynamicObstacles(): void {
+    this.dynamicObstacles.clear();
+  }
+
+  /**
+   * Check if a position is blocked by dynamic obstacles
+   */
+  private isDynamicObstacle(grid: { col: number; row: number }): boolean {
+    return this.dynamicObstacles.has(positionKey(grid));
+  }
+
+  /**
+   * Check if a robot can occupy a grid position considering its full size
+   * Checks all cells within the robot's radius for obstacles
+   */
+  private canRobotOccupy(grid: { col: number; row: number }): boolean {
+    const robotRadius = Math.ceil(this.options.robotWidth / 2 / this.field.config.cellSize);
+
+    // Check all cells within robot's footprint
+    for (let dr = -robotRadius; dr <= robotRadius; dr++) {
+      for (let dc = -robotRadius; dc <= robotRadius; dc++) {
+        const checkGrid = { row: grid.row + dr, col: grid.col + dc };
+
+        // Check bounds
+        if (!this.field.isInBounds(checkGrid)) {
+          return false;
+        }
+
+        // Check if cell is traversable
+        if (!this.field.canRobotTraverse(checkGrid, this.options.robotHeight)) {
+          return false;
+        }
+
+        // Check dynamic obstacles
+        if (this.isDynamicObstacle(checkGrid)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  /**
    * Find a path from start to goal positions
    */
   findPath(start: Position, goal: Position): PathResult {
     const startGrid = this.field.positionToGrid(start);
     const goalGrid = this.field.positionToGrid(goal);
 
-    // Quick check: if goal is unreachable, fail fast
-    if (!this.field.canRobotTraverse(goalGrid, this.options.robotHeight)) {
+    // Quick check: if goal is unreachable (considering robot size), fail fast
+    if (!this.canRobotOccupy(goalGrid)) {
       return {
         path: [],
         found: false,
@@ -132,8 +239,8 @@ export class AStar {
         // Skip if already evaluated
         if (closedSet.has(neighborKey)) continue;
 
-        // Skip if not traversable
-        if (!this.field.canRobotTraverse(neighbor, this.options.robotHeight)) {
+        // Skip if robot can't occupy this position (considering full robot size)
+        if (!this.canRobotOccupy(neighbor)) {
           continue;
         }
 

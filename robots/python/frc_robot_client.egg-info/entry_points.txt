@@ -1,0 +1,2 @@
+[console_scripts]
+robot = frc_robot.cli:main

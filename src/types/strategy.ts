@@ -19,6 +19,8 @@ export interface StrategyContext {
   opponents: RobotState[];
   /** Available balls on field */
   availableBalls: Ball[];
+  /** Available balls not claimed by any teammate (for coordination) */
+  unclaimedBalls: Ball[];
   /** Balls held by teammates */
   teammateBalls: Ball[];
   /** Scoring targets for this alliance */
@@ -27,6 +29,10 @@ export interface StrategyContext {
   nearestBallDistance: number | null;
   /** Nearest ball */
   nearestBall: Ball | null;
+  /** Distance to nearest unclaimed ball (balls not claimed by teammates) */
+  nearestUnclaimedBallDistance: number | null;
+  /** Nearest unclaimed ball */
+  nearestUnclaimedBall: Ball | null;
   /** Distance to nearest scoring target */
   nearestScoringTargetDistance: number | null;
   /** Nearest scoring target */
@@ -57,6 +63,14 @@ export interface StrategyContext {
   isNearClimbingZone: boolean;
   /** Position of the alliance's climbing zone center */
   climbingZonePosition: Position | null;
+  /** Whether robot has a clear shot path to nearest scoring target (no obstacles) */
+  hasClearShotPath: boolean;
+  /** Whether robot is in a good shooting position (not on ramp, not in trench, not in no-score zone) */
+  isGoodShootingPosition: boolean;
+  /** Whether robot is on its own alliance's side of the field */
+  isOnOwnSide: boolean;
+  /** Whether robot is in a no-score zone (middle zone) */
+  isInNoScoreZone: boolean;
 }
 
 /**

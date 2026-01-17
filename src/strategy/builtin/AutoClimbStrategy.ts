@@ -18,8 +18,6 @@ export class AutoClimbStrategy extends BaseStrategy {
   decide(context: StrategyContext): StrategyDecision {
     const {
       robot,
-      nearestBall,
-      nearestBallDistance,
       nearestScoringTarget,
       nearestScoringTargetDistance,
       inShootingRange,
@@ -29,10 +27,22 @@ export class AutoClimbStrategy extends BaseStrategy {
       allianceCanAutoClimb,
     } = context;
 
-    // During AUTO: try to auto climb if capable and haven't already
+    // Use unclaimed balls for alliance coordination
+    const nearestBall = context.nearestUnclaimedBall ?? context.nearestBall;
+    const nearestBallDistance = context.nearestUnclaimedBallDistance ?? context.nearestBallDistance;
+
+    // During AUTO
     if (phase === MatchPhase.AUTO) {
-      // If we can auto climb and there are slots available
-      if (canAutoClimb && allianceCanAutoClimb && !robot.hasAutoClimbed) {
+      // If already auto-climbed, stay at climb zone until phase ends
+      if (robot.hasAutoClimbed) {
+        return this.idle('Auto - staying at climb zone until phase ends');
+      }
+
+      // Only start climbing near the end of auto (when < 8 seconds remain)
+      const shouldAutoClimb = context.phaseTimeRemaining < 8;
+
+      // If we can auto climb and there are slots available and time to climb
+      if (canAutoClimb && allianceCanAutoClimb && shouldAutoClimb) {
         // If already climbing, let it continue
         if (robot.currentAction.type === RobotActionType.CLIMBING) {
           return this.idle('Continuing auto climb');
@@ -55,16 +65,16 @@ export class AutoClimbStrategy extends BaseStrategy {
         return this.autoClimb(StrategyPriority.CRITICAL, 'Auto period - climbing');
       }
 
-      // After auto climb (or if can't climb), try to score
+      // Before climbing time or if can't climb, try to score
       if (canScore && robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
         return this.shoot(
           nearestScoringTarget.id,
           StrategyPriority.HIGH,
-          'Auto - shooting after climb'
+          'Auto - shooting'
         );
       }
 
-      // Collect balls during remaining auto time
+      // Collect balls during auto time
       if (robot.heldBalls.length < robot.config.ballCapacity && nearestBall && nearestBallDistance !== null) {
         if (nearestBallDistance < 18) {
           return this.pickup(nearestBall.id, StrategyPriority.MEDIUM, 'Auto - picking up ball');
@@ -81,6 +91,9 @@ export class AutoClimbStrategy extends BaseStrategy {
       }
     }
 
+    // Only start climbing near the end of endgame (when < 12 seconds remain)
+    const shouldEndgameClimb = context.phaseTimeRemaining < 12;
+
     // In endgame, prioritize climbing (endgame climb)
     if (phase === MatchPhase.ENDGAME && robot.config.canClimb && !robot.hasClimbed && context.allianceCanEndgameClimb) {
       // If already climbing, let it continue
@@ -88,34 +101,39 @@ export class AutoClimbStrategy extends BaseStrategy {
         return this.idle('Continuing endgame climb');
       }
 
-      // Must be near climbing zone to climb
-      if (!context.isNearClimbingZone && context.climbingZonePosition) {
-        if (robot.currentAction.type === RobotActionType.MOVING) {
-          return this.idle('Moving to climb zone');
+      // Shoot remaining balls first if not yet time to climb
+      if (!shouldEndgameClimb || robot.heldBalls.length > 0) {
+        if (canScore && robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
+          return this.shoot(
+            nearestScoringTarget.id,
+            StrategyPriority.HIGH,
+            'Endgame - shooting before climb'
+          );
         }
-        return this.moveTo(
-          context.climbingZonePosition.x,
-          context.climbingZonePosition.y,
+      }
+
+      // Time to climb
+      if (shouldEndgameClimb) {
+        // Must be near climbing zone to climb
+        if (!context.isNearClimbingZone && context.climbingZonePosition) {
+          if (robot.currentAction.type === RobotActionType.MOVING) {
+            return this.idle('Moving to climb zone');
+          }
+          return this.moveTo(
+            context.climbingZonePosition.x,
+            context.climbingZonePosition.y,
+            StrategyPriority.CRITICAL,
+            'Endgame - moving to climb zone'
+          );
+        }
+
+        // Climb at configured level
+        return this.endgameClimb(
+          robot.config.climbLevel,
           StrategyPriority.CRITICAL,
-          'Endgame - moving to climb zone'
+          `Endgame - climbing to level ${robot.config.climbLevel}`
         );
       }
-
-      // Shoot remaining balls first if we can score and are in range
-      if (canScore && robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
-        return this.shoot(
-          nearestScoringTarget.id,
-          StrategyPriority.HIGH,
-          'Endgame - shooting before climb'
-        );
-      }
-
-      // Then climb at max level
-      return this.endgameClimb(
-        robot.config.climbLevel,
-        StrategyPriority.CRITICAL,
-        `Endgame - climbing to level ${robot.config.climbLevel}`
-      );
     }
 
     // Standard scoring behavior during teleop

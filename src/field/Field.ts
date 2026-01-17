@@ -168,6 +168,143 @@ export class Field {
   }
 
   /**
+   * Check if a position is in a no-score zone
+   */
+  isInNoScoreZone(pos: Position): boolean {
+    const modifiers = this.getModifiers(pos);
+    return modifiers.noScoring === true;
+  }
+
+  /**
+   * Check if a position is in a ball-blocking zone (scoring areas block balls)
+   */
+  isInBallBlockingZone(pos: Position): boolean {
+    const modifiers = this.getModifiers(pos);
+    return modifiers.blocksBalls === true;
+  }
+
+  /**
+   * Get ramp height at a position (for ball physics)
+   * Returns 0 if not on a ramp, otherwise interpolated height based on position within ramp
+   */
+  getRampHeightAtPosition(pos: Position): number {
+    const cell = this.getCellAtPosition(pos);
+    if (!cell || cell.zone !== ZoneType.RAMP) return 0;
+
+    const rampHeight = cell.modifiers.rampHeight ?? 0;
+    if (rampHeight === 0) return 0;
+
+    // Find the ramp zone this position is in
+    for (const zone of this.config.zones) {
+      if (zone.type !== 'RAMP') continue;
+      if (
+        pos.x >= zone.bounds.minX &&
+        pos.x <= zone.bounds.maxX &&
+        pos.y >= zone.bounds.minY &&
+        pos.y <= zone.bounds.maxY
+      ) {
+        // Calculate position within ramp (0 = edge, 1 = center)
+        const zoneCenterX = (zone.bounds.minX + zone.bounds.maxX) / 2;
+        const zoneWidth = zone.bounds.maxX - zone.bounds.minX;
+        const distFromCenter = Math.abs(pos.x - zoneCenterX);
+        const normalizedDist = distFromCenter / (zoneWidth / 2);
+
+        // Ramp is highest at center, tapers to 0 at edges
+        // Use a smooth curve (parabolic) for the ramp profile
+        const heightFactor = 1 - normalizedDist * normalizedDist;
+        return rampHeight * Math.max(0, heightFactor);
+      }
+    }
+
+    return 0;
+  }
+
+  /**
+   * Check if a position is on a ramp
+   */
+  isOnRamp(pos: Position): boolean {
+    const cell = this.getCellAtPosition(pos);
+    return cell?.zone === ZoneType.RAMP;
+  }
+
+  /**
+   * Check if there's a clear shot path between two positions (no obstacles/barriers)
+   * Shots from a robot's own third of the field are allowed to pass into their scoring zone
+   */
+  hasClearShotPath(from: Position, to: Position, steps: number = 20): boolean {
+    const fieldWidth = this.config.width;
+    const leftThirdBoundary = fieldWidth / 3;      // 216" for 648" field
+    const rightThirdBoundary = (fieldWidth * 2) / 3; // 432" for 648" field
+
+    // Determine which third the shot originates from
+    const isFromLeftThird = from.x < leftThirdBoundary;
+    const isFromRightThird = from.x > rightThirdBoundary;
+
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const checkPos: Position = {
+        x: from.x + (to.x - from.x) * t,
+        y: from.y + (to.y - from.y) * t,
+      };
+      const cell = this.getCellAtPosition(checkPos);
+      if (!cell) return false;
+
+      // Check for obstacles that block shots
+      if (cell.zone === ZoneType.OBSTACLE) return false;
+
+      // Cells with blocksBalls modifier block shots that pass through them,
+      // UNLESS the shot originates from the proper third of the field
+      // (Check blocksBalls modifier rather than zone type since zones can be overwritten)
+      if (cell.modifiers.blocksBalls) {
+        // Check if this blocking zone is on the left or right side
+        const zoneIsOnLeftSide = checkPos.x < fieldWidth / 2;
+
+        // Allow shots from left third through left blocking zone (red side)
+        // Allow shots from right third through right blocking zone (blue side)
+        const isAllowed = (isFromLeftThird && zoneIsOnLeftSide) ||
+                          (isFromRightThird && !zoneIsOnLeftSide);
+
+        if (!isAllowed) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Check if a position is good for shooting (not on ramp, not in trench, not in no-score zone)
+   */
+  isGoodShootingPosition(pos: Position): boolean {
+    const cell = this.getCellAtPosition(pos);
+    if (!cell) return false;
+
+    // Can't shoot from ramps
+    if (cell.zone === ZoneType.RAMP) return false;
+
+    // Can't shoot from trenches
+    if (cell.zone === ZoneType.TRENCH) return false;
+
+    // Can't shoot from no-score zone
+    if (cell.modifiers.noScoring) return false;
+
+    return true;
+  }
+
+  /**
+   * Check if a position is on the correct side of the field for an alliance
+   */
+  isOnAllianceSide(pos: Position, alliance: 'red' | 'blue'): boolean {
+    const centerX = this.config.width / 2;
+    // Red is on the left (low X), Blue is on the right (high X)
+    if (alliance === 'red') {
+      return pos.x < centerX;
+    } else {
+      return pos.x > centerX;
+    }
+  }
+
+  /**
    * Check if a robot can traverse a cell based on height restrictions
    */
   canRobotTraverse(grid: GridPosition, robotHeight: number): boolean {
@@ -176,6 +313,11 @@ export class Field {
 
     // Check for impassable zones
     if (cell.zone === ZoneType.OBSTACLE || cell.zone === ZoneType.OUT_OF_BOUNDS) {
+      return false;
+    }
+
+    // Scoring zones with blocksBalls are also impassable to robots
+    if (cell.zone === ZoneType.SCORING_ZONE && cell.modifiers.blocksBalls) {
       return false;
     }
 

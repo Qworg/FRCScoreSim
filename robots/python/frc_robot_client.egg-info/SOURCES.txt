@@ -1,0 +1,17 @@
+README.md
+pyproject.toml
+frc_robot/__init__.py
+frc_robot/cli.py
+frc_robot/client.py
+frc_robot/protocol.py
+frc_robot/strategies/__init__.py
+frc_robot/strategies/base.py
+frc_robot/strategies/collector.py
+frc_robot/strategies/idle.py
+frc_robot/strategies/scorer.py
+frc_robot_client.egg-info/PKG-INFO
+frc_robot_client.egg-info/SOURCES.txt
+frc_robot_client.egg-info/dependency_links.txt
+frc_robot_client.egg-info/entry_points.txt
+frc_robot_client.egg-info/requires.txt
+frc_robot_client.egg-info/top_level.txt

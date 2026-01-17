@@ -77,6 +77,14 @@ export { EndgameClimberStrategy } from './strategy/builtin/EndgameClimberStrateg
 export { VisualizationServer } from './visualization/WebSocketServer.js';
 export type { WSMessage, WSMessageType, ConfigMessage, ControlHandler } from './visualization/WebSocketServer.js';
 
+// Distributed
+export { WorldServer, WorldServerEvents } from './distributed/WorldServer.js';
+export { RobotClient } from './distributed/RobotClient.js';
+export type { RobotClientConfig, RobotClientEventHandlers } from './distributed/RobotClient.js';
+export { TickBarrier } from './distributed/TickBarrier.js';
+export type { BarrierResult, TickBarrierConfig } from './distributed/TickBarrier.js';
+export { MessagePacker, ErrorCodes } from './distributed/MessagePacker.js';
+
 // Utilities
 export {
   Vector2D,
@@ -179,14 +187,10 @@ export async function runRealtimeMatch(
  * Quick demo - create a match with default robots
  */
 export function createDemoSetup(): MatchSetup {
-  // Generate 360 balls in center: 12 columns × 30 rows
-  const ballSpawnPoints = [];
+  const ballSpawnPoints: Array<{ id: string; position: { x: number; y: number }; alliance: null }> = [];
   let ballId = 1;
 
-  // Ball grid: 12 horizontal × 30 vertical = 360 balls
-  // Center at x=324, spread balls around it
-  // Horizontal: 12 balls with ~10" spacing = 110" total, centered at 324
-  // Vertical: 30 balls with ~10" spacing = 290" total, centered at 162
+  // === CENTER BALLS: 12 columns × 30 rows = 360 balls ===
   const cols = 12;
   const rows = 30;
   const hSpacing = 10; // inches between balls horizontally
@@ -198,16 +202,69 @@ export function createDemoSetup(): MatchSetup {
     for (let row = 0; row < rows; row++) {
       const x = startX + col * hSpacing;
       const y = startY + row * vSpacing;
-      ballSpawnPoints.push({ id: `ball-${ballId++}`, position: { x, y }, alliance: null });
+      ballSpawnPoints.push({ id: `center-${ballId++}`, position: { x, y }, alliance: null });
     }
   }
 
-  // Field layout:
-  // - Red side: x = 0 to 324, Blue side: x = 324 to 648
-  // - Red midline (1/4 field): x = 162
-  // - Blue midline (3/4 field): x = 486
-  // - Goals at each side's midline
-  // - Climbing apparatus at field ends (42" wide = 3.5')
+  // === SIDE BALLS: 4 groups of 4×6 = 96 balls ===
+  // Helper to create a 4×6 ball grid
+  const createBallGrid = (centerY: number, startX: number, xDirection: number, prefix: string) => {
+    const gridCols = 4;
+    const gridRows = 6;
+    const spacing = 5; // 5" ball diameter
+
+    for (let row = 0; row < gridRows; row++) {
+      for (let col = 0; col < gridCols; col++) {
+        // X: start from wall, go inward
+        const x = startX + xDirection * (col * spacing + 2.5);
+        // Y: center around centerY
+        const y = centerY - ((gridRows - 1) * spacing) / 2 + row * spacing;
+        ballSpawnPoints.push({ id: `${prefix}-${ballId++}`, position: { x, y }, alliance: null });
+      }
+    }
+  };
+
+  // Right side balls (against right wall, X = 648)
+  // Bottom group: centered at Y = 82.32"
+  createBallGrid(82.32, 648, -1, 'right-bottom');
+  // Top group: centered at Y = 291.02" (82.32 + 87.46 + 121.24)
+  createBallGrid(291.02, 648, -1, 'right-top');
+
+  // Left side balls (against left wall, X = 0) - mirrored about Y = 162
+  // Top group (mirror of right bottom): centered at Y = 324 - 82.32 = 241.68"
+  createBallGrid(241.68, 0, 1, 'left-top');
+  // Bottom group (mirror of right top): centered at Y = 324 - 291.02 = 32.98"
+  createBallGrid(32.98, 0, 1, 'left-bottom');
+
+  // Field structure positions:
+  // Left side centered at X = 181.56", Right side mirrored at X = 466.44"
+  // From top wall (Y=324) going down: trench, barrier, ramp, scoring area, ramp, barrier, trench
+  const leftCenterX = 181.56;
+  const rightCenterX = 648 - 181.56; // 466.44
+
+  // Y positions from top to bottom
+  // Trench: 49.86" in Y, Barrier: 12" in Y, Ramp: 73" in Y, Scoring: 47" in Y
+  const trench1Top = 324;
+  const trench1Bottom = 324 - 49.86; // 274.14
+  const barrier1Top = trench1Bottom;
+  const barrier1Bottom = barrier1Top - 12; // 262.14
+  const ramp1Top = barrier1Bottom;
+  const ramp1Bottom = ramp1Top - 73; // 189.14 (ramp is 73" in Y)
+  const scoringTop = ramp1Bottom;
+  const scoringBottom = scoringTop - 47; // 142.14
+  const ramp2Top = scoringBottom;
+  const ramp2Bottom = ramp2Top - 73; // 69.14 (ramp is 73" in Y)
+  const barrier2Top = ramp2Bottom;
+  const barrier2Bottom = barrier2Top - 12; // 57.14
+  const trench2Top = barrier2Bottom;
+  const trench2Bottom = Math.max(0, trench2Top - 49.86); // 7.28
+
+  // X widths
+  const rampWidth = 73;
+  const barrierWidth = 47; // 47" in X dimension
+  const scoringWidth = 47;
+  const trenchWidth = 73; // Same as ramp
+
   const fieldConfig = {
     name: 'Demo Field',
     year: 2025,
@@ -215,54 +272,239 @@ export function createDemoSetup(): MatchSetup {
     height: 324,
     cellSize: 1,
     zones: [
-      // Red climbing apparatus at red end - horizontal bar parallel to vertical wall
-      // 84" wide (7'), 24" deep, centered vertically at x=21 (touching left wall)
+      // === CLIMBING ZONES ===
+      // Red climbing apparatus: center at X=67.3", Y=154.22", 24" wide × 47" tall
       {
         name: 'Red Climbing Apparatus',
         type: ZoneType.CLIMBING,
-        bounds: { minX: 0, maxX: 24, minY: 120, maxY: 204 }, // horizontal bar at left wall
+        bounds: { minX: 55, maxX: 79, minY: 131, maxY: 178 },
       },
-      // Blue climbing apparatus at blue end - horizontal bar parallel to vertical wall
-      // 84" wide (7'), 24" deep, centered vertically at x=627 (touching right wall)
+      // Blue climbing apparatus: center at X=580.7", Y=169.78", 24" wide × 47" tall
       {
         name: 'Blue Climbing Apparatus',
         type: ZoneType.CLIMBING,
-        bounds: { minX: 624, maxX: 648, minY: 120, maxY: 204 }, // horizontal bar at right wall
+        bounds: { minX: 569, maxX: 593, minY: 146, maxY: 193 },
+      },
+
+      // === LEFT SIDE STRUCTURES (centered at X = 181.56") ===
+      // Trench 1 (top) - 22.25" max height
+      {
+        name: 'Left Trench Top',
+        type: ZoneType.TRENCH,
+        bounds: {
+          minX: leftCenterX - trenchWidth / 2,
+          maxX: leftCenterX + trenchWidth / 2,
+          minY: trench1Bottom,
+          maxY: trench1Top,
+        },
+        modifiers: { maxHeight: 22.25 },
+      },
+      // Barrier 1 (top) - obstacle
+      {
+        name: 'Left Barrier Top',
+        type: ZoneType.OBSTACLE,
+        bounds: {
+          minX: leftCenterX - barrierWidth / 2,
+          maxX: leftCenterX + barrierWidth / 2,
+          minY: barrier1Bottom,
+          maxY: barrier1Top,
+        },
+      },
+      // Ramp 1 (top)
+      {
+        name: 'Left Ramp Top',
+        type: ZoneType.RAMP,
+        bounds: {
+          minX: leftCenterX - rampWidth / 2,
+          maxX: leftCenterX + rampWidth / 2,
+          minY: ramp1Bottom,
+          maxY: ramp1Top,
+        },
+        modifiers: { speedMultiplier: 0.7, rampHeight: 6 },
+      },
+      // Scoring Area (center) - blocks ball passage
+      {
+        name: 'Left Scoring Area',
+        type: ZoneType.SCORING_ZONE,
+        bounds: {
+          minX: leftCenterX - scoringWidth / 2,
+          maxX: leftCenterX + scoringWidth / 2,
+          minY: scoringBottom,
+          maxY: scoringTop,
+        },
+        modifiers: { blocksBalls: true },
+      },
+      // Ramp 2 (bottom)
+      {
+        name: 'Left Ramp Bottom',
+        type: ZoneType.RAMP,
+        bounds: {
+          minX: leftCenterX - rampWidth / 2,
+          maxX: leftCenterX + rampWidth / 2,
+          minY: ramp2Bottom,
+          maxY: ramp2Top,
+        },
+        modifiers: { speedMultiplier: 0.7, rampHeight: 6 },
+      },
+      // Barrier 2 (bottom) - obstacle
+      {
+        name: 'Left Barrier Bottom',
+        type: ZoneType.OBSTACLE,
+        bounds: {
+          minX: leftCenterX - barrierWidth / 2,
+          maxX: leftCenterX + barrierWidth / 2,
+          minY: barrier2Bottom,
+          maxY: barrier2Top,
+        },
+      },
+      // Trench 2 (bottom) - 22.25" max height
+      {
+        name: 'Left Trench Bottom',
+        type: ZoneType.TRENCH,
+        bounds: {
+          minX: leftCenterX - trenchWidth / 2,
+          maxX: leftCenterX + trenchWidth / 2,
+          minY: trench2Bottom,
+          maxY: trench2Top,
+        },
+        modifiers: { maxHeight: 22.25 },
+      },
+
+      // === RIGHT SIDE STRUCTURES (mirrored, centered at X = 466.44") ===
+      // Trench 1 (top) - 22.25" max height
+      {
+        name: 'Right Trench Top',
+        type: ZoneType.TRENCH,
+        bounds: {
+          minX: rightCenterX - trenchWidth / 2,
+          maxX: rightCenterX + trenchWidth / 2,
+          minY: trench1Bottom,
+          maxY: trench1Top,
+        },
+        modifiers: { maxHeight: 22.25 },
+      },
+      // Barrier 1 (top) - obstacle
+      {
+        name: 'Right Barrier Top',
+        type: ZoneType.OBSTACLE,
+        bounds: {
+          minX: rightCenterX - barrierWidth / 2,
+          maxX: rightCenterX + barrierWidth / 2,
+          minY: barrier1Bottom,
+          maxY: barrier1Top,
+        },
+      },
+      // Ramp 1 (top)
+      {
+        name: 'Right Ramp Top',
+        type: ZoneType.RAMP,
+        bounds: {
+          minX: rightCenterX - rampWidth / 2,
+          maxX: rightCenterX + rampWidth / 2,
+          minY: ramp1Bottom,
+          maxY: ramp1Top,
+        },
+        modifiers: { speedMultiplier: 0.7, rampHeight: 6 },
+      },
+      // Scoring Area (center) - blocks ball passage
+      {
+        name: 'Right Scoring Area',
+        type: ZoneType.SCORING_ZONE,
+        bounds: {
+          minX: rightCenterX - scoringWidth / 2,
+          maxX: rightCenterX + scoringWidth / 2,
+          minY: scoringBottom,
+          maxY: scoringTop,
+        },
+        modifiers: { blocksBalls: true },
+      },
+      // Ramp 2 (bottom)
+      {
+        name: 'Right Ramp Bottom',
+        type: ZoneType.RAMP,
+        bounds: {
+          minX: rightCenterX - rampWidth / 2,
+          maxX: rightCenterX + rampWidth / 2,
+          minY: ramp2Bottom,
+          maxY: ramp2Top,
+        },
+        modifiers: { speedMultiplier: 0.7, rampHeight: 6 },
+      },
+      // Barrier 2 (bottom) - obstacle
+      {
+        name: 'Right Barrier Bottom',
+        type: ZoneType.OBSTACLE,
+        bounds: {
+          minX: rightCenterX - barrierWidth / 2,
+          maxX: rightCenterX + barrierWidth / 2,
+          minY: barrier2Bottom,
+          maxY: barrier2Top,
+        },
+      },
+      // Trench 2 (bottom) - 22.25" max height
+      {
+        name: 'Right Trench Bottom',
+        type: ZoneType.TRENCH,
+        bounds: {
+          minX: rightCenterX - trenchWidth / 2,
+          maxX: rightCenterX + trenchWidth / 2,
+          minY: trench2Bottom,
+          maxY: trench2Top,
+        },
+        modifiers: { maxHeight: 22.25 },
+      },
+
+      // === NO-SCORE ZONE (middle 287" of field) ===
+      {
+        name: 'No Score Zone',
+        type: ZoneType.NORMAL,
+        bounds: {
+          minX: 324 - 143.5, // 180.5
+          maxX: 324 + 143.5, // 467.5
+          minY: 0,
+          maxY: 324,
+        },
+        modifiers: { noScoring: true },
       },
     ],
     ballSpawnPoints,
     scoringTargets: [
-      // Red goal at red side midline (1/4 of field)
+      // Red goal centered in left scoring area (48" diameter circle)
+      // Scoring area center: X = 181.56", Y = (142.14 + 189.14) / 2 = 165.64"
       {
         id: 'red-goal',
         name: 'Red Goal',
-        position: { x: 162, y: 162 },
-        radius: 24,
+        position: { x: leftCenterX, y: (scoringBottom + scoringTop) / 2 },
+        radius: 24, // 48" diameter
         alliance: 'red' as const,
         points: { auto: 4, teleop: 2 },
       },
-      // Blue goal at blue side midline (3/4 of field)
+      // Blue goal centered in right scoring area (48" diameter circle)
       {
         id: 'blue-goal',
         name: 'Blue Goal',
-        position: { x: 486, y: 162 },
-        radius: 24,
+        position: { x: rightCenterX, y: (scoringBottom + scoringTop) / 2 },
+        radius: 24, // 48" diameter
         alliance: 'blue' as const,
         points: { auto: 4, teleop: 2 },
       },
     ],
     startingPositions: {
-      // Red robots start at red side midline
+      // Red robots start on red side, past the edge of structures
+      // Robot edge must be at most 181.56-23.5=158.06" from left wall
+      // With 28" wide robots, center at X <= 144
       red: [
-        { x: 162, y: 80 },
-        { x: 162, y: 162 },
-        { x: 162, y: 244 },
+        { x: 100, y: 100 },
+        { x: 100, y: 162 },
+        { x: 100, y: 224 },
       ],
-      // Blue robots start at blue side midline
+      // Blue robots start on blue side, past the edge of structures
+      // Robot edge must be at least 648-158.06=489.94" from left wall
+      // With 28" wide robots, center at X >= 504
       blue: [
-        { x: 486, y: 80 },
-        { x: 486, y: 162 },
-        { x: 486, y: 244 },
+        { x: 548, y: 100 },
+        { x: 548, y: 162 },
+        { x: 548, y: 224 },
       ],
     },
   };

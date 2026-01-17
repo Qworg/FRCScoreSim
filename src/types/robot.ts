@@ -13,6 +13,8 @@ export interface RobotConfig {
   length: number;
   /** Height in inches */
   height: number;
+  /** Collection face size in inches (defaults to width if not specified) */
+  collectionFaceSize?: number;
   /** Top speed in inches per second */
   topSpeed: number;
   /** Acceleration in inches per second squared */
@@ -65,8 +67,10 @@ export interface RobotAction {
   type: RobotActionType;
   /** Target position for movement */
   targetPosition?: Position;
-  /** Target ball ID for pickup */
+  /** Target ball ID for pickup (primary target for compatibility) */
   targetBallId?: string;
+  /** All ball IDs being picked up (for multi-ball pickup) */
+  targetBallIds?: string[];
   /** Target scoring zone for shooting */
   targetScoringZoneId?: string;
   /** Target robot ID for passing */
@@ -120,6 +124,8 @@ export interface RobotCommand {
   type: RobotActionType;
   targetPosition?: Position;
   targetBallId?: string;
+  /** All ball IDs to pick up (for multi-ball pickup) */
+  targetBallIds?: string[];
   targetScoringZoneId?: string;
   targetRobotId?: string;
   /** Target climb level (1-3) for climbing */

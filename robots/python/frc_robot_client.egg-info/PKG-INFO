@@ -1,0 +1,152 @@
+Metadata-Version: 2.4
+Name: frc-robot-client
+Version: 0.1.0
+Summary: Python robot client for FRC Score Simulator distributed mode
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: msgpack>=1.1.2
+Requires-Dist: websockets>=12.0
+
+# FRC Robot Client - Python
+
+A Python implementation of the robot client for the FRC Score Simulator distributed mode.
+
+## Installation
+
+Using [uv](https://github.com/astral-sh/uv):
+
+```bash
+cd robots/python
+uv sync
+```
+
+Or with pip:
+
+```bash
+pip install -e .
+```
+
+## Usage
+
+### Command Line
+
+```bash
+# Using uv
+uv run robot --id red-1 --strategy collector
+
+# Or if installed
+robot --id red-1 --strategy collector
+
+# Full options
+robot --id red-1 --strategy scorer --server ws://192.168.1.100:8081 --verbose
+```
+
+### Available Strategies
+
+- `idle` - Does nothing (useful for testing)
+- `collector` - Prioritizes collecting balls, shoots when full or in range
+- `scorer` - Prioritizes scoring, stays near goal
+
+### Command Line Options
+
+```
+--id, -i       Robot ID (required) - e.g., red-1, blue-2
+--strategy, -s Strategy to use (default: collector)
+--server, -S   World server URL (default: ws://localhost:8081)
+--name, -n     Client name for logging
+--verbose, -v  Enable verbose logging
+--debug, -d    Enable debug logging
+```
+
+## Custom Strategies
+
+Create your own strategy by inheriting from `BaseStrategy`:
+
+```python
+from frc_robot import RobotClient
+from frc_robot.protocol import WorldState, RobotCommand
+from frc_robot.strategies import BaseStrategy
+
+class MyStrategy(BaseStrategy):
+    def decide(self, world_state: WorldState) -> RobotCommand:
+        my_robot = world_state.my_robot
+        tick = world_state.tick
+
+        # Your logic here
+        if self.has_balls(world_state):
+            # Shoot if we have balls and can score
+            if world_state.can_alliance_score():
+                target_id = self.get_scoring_target_id(world_state)
+                if target_id:
+                    return RobotCommand.shoot(tick, my_robot.id, target_id)
+
+        # Find nearest ball and move to it
+        ball = self.find_nearest_ball(world_state)
+        if ball:
+            return RobotCommand.move_to(tick, my_robot.id, ball.x, ball.y)
+
+        return RobotCommand.idle(tick, my_robot.id)
+
+# Run with custom strategy
+import asyncio
+
+async def main():
+    client = RobotClient(
+        server_url="ws://localhost:8081",
+        robot_id="red-1",
+        strategy=MyStrategy(),
+    )
+    await client.run()
+
+asyncio.run(main())
+```
+
+## Protocol
+
+See [docs/PROTOCOL.md](../../docs/PROTOCOL.md) for the full protocol specification.
+
+### Key Types
+
+- `WorldState` - Complete world state received each tick
+- `RobotCommand` - Command to send back to the server
+- `RobotState` - State of a robot
+- `BallStateData` - State of a ball
+- `FieldConfig` - Field configuration (received once on connect)
+
+### RobotCommand Factory Methods
+
+```python
+# Do nothing
+RobotCommand.idle(tick, robot_id)
+
+# Move to a position
+RobotCommand.move_to(tick, robot_id, x, y)
+
+# Pick up a ball
+RobotCommand.pick_up(tick, robot_id, ball_id)
+
+# Shoot at scoring target
+RobotCommand.shoot(tick, robot_id, target_zone_id)
+
+# Climb
+RobotCommand.climb(tick, robot_id, level, is_auto=False)
+```
+
+## Running with the World Server
+
+1. Start the world server (from the main project):
+   ```bash
+   npm run serve:world
+   ```
+
+2. Connect Python robots:
+   ```bash
+   uv run robot --id red-1 --strategy scorer
+   uv run robot --id red-2 --strategy collector
+   uv run robot --id red-3 --strategy scorer
+   uv run robot --id blue-1 --strategy scorer
+   uv run robot --id blue-2 --strategy collector
+   uv run robot --id blue-3 --strategy scorer
+   ```
+
+3. Open http://localhost:3000 to watch the match

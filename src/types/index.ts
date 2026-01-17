@@ -47,8 +47,11 @@ export type {
   SimulationConfig,
   RobotSetup,
   MatchSetup,
+  StuckState,
+  ObstacleInfo,
+  EscapeAction,
 } from './simulation.js';
-export { SimulationMode, DEFAULT_SIMULATION_CONFIG } from './simulation.js';
+export { SimulationMode, DEFAULT_SIMULATION_CONFIG, EscapeStrategy } from './simulation.js';
 
 // Strategy types
 export type {
@@ -59,3 +62,56 @@ export type {
   StrategyRegistryEntry,
 } from './strategy.js';
 export { StrategyPriority } from './strategy.js';
+
+// Logging types
+export type {
+  DecisionLogEntry,
+  DecisionLogStats,
+  DecisionInfo,
+  ExecutionInfo,
+} from './logging.js';
+export { DecisionRejectionReason } from './logging.js';
+
+// Valuation types
+export type {
+  ActionValueFactors,
+  EvaluatedAction,
+  ValuatorConfig,
+  ActionCandidate,
+} from './valuation.js';
+export { DEFAULT_VALUATOR_CONFIG } from './valuation.js';
+
+// Distributed types
+export type {
+  DistributedConfig,
+  WireRobotState,
+  WireBallState,
+  WireWorldState,
+  WireRobotCommand,
+  WireMessage,
+  ClientHelloPayload,
+  FieldConfigPayload,
+  TickUpdatePayload,
+  RobotCommandPayload,
+  MatchEndPayload,
+  ErrorPayload,
+} from './distributed.js';
+export {
+  ExecutionMode,
+  DistributedMessageType,
+  WireMatchPhase,
+  WireRobotActionType,
+  WireBallStateEnum,
+  WireShiftParity,
+  WireAlliance,
+  DEFAULT_DISTRIBUTED_CONFIG,
+  PROTOCOL_VERSION,
+  matchPhaseToWire,
+  wireToMatchPhase,
+  robotActionToWire,
+  wireToRobotAction,
+  shiftParityToWire,
+  wireToShiftParity,
+  allianceToWire,
+  wireToAlliance,
+} from './distributed.js';

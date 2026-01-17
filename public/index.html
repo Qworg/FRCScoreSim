@@ -340,7 +340,27 @@
         </div>
         <div class="legend-item">
           <div class="legend-color climb-bar"></div>
-          <span>Climb Bar</span>
+          <span>Climb Zone</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background: rgba(139, 69, 19, 0.6);"></div>
+          <span>Trench</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background: rgba(128, 128, 128, 0.6);"></div>
+          <span>Ramp</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background: rgba(255, 0, 0, 0.5);"></div>
+          <span>Barrier</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background: rgba(255, 215, 0, 0.5);"></div>
+          <span>Scoring Area</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background: transparent; border: 2px dashed #888; width: 24px;"></div>
+          <span>Robot Path</span>
         </div>
       </div>
     </div>
@@ -559,6 +579,7 @@
 
       // Draw game objects
       if (gameState) {
+        drawPaths();  // Draw paths first (behind robots)
         drawBalls();
         drawRobots();
       }
@@ -566,6 +587,11 @@
 
     // Draw field markings
     function drawFieldMarkings() {
+      // Draw zones first (behind everything else)
+      if (config && config.field && config.field.zones) {
+        drawZones();
+      }
+
       ctx.strokeStyle = 'rgba(255,255,255,0.2)';
       ctx.lineWidth = 2;
 
@@ -575,81 +601,158 @@
       ctx.lineTo(canvas.width / 2, canvas.height);
       ctx.stroke();
 
-      // Auto line (approximately)
-      ctx.setLineDash([10, 10]);
-      ctx.beginPath();
-      ctx.moveTo(canvas.width * 0.25, 0);
-      ctx.lineTo(canvas.width * 0.25, canvas.height);
-      ctx.moveTo(canvas.width * 0.75, 0);
-      ctx.lineTo(canvas.width * 0.75, canvas.height);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
       // Field border
       ctx.strokeStyle = 'rgba(255,255,255,0.5)';
       ctx.lineWidth = 4;
       ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
 
-      // Draw climb bars at center of horizontal ends
+      // Draw climb bars
       drawClimbBars();
     }
 
-    // Draw climb bars (vertical, parallel to the vertical walls)
-    function drawClimbBars() {
-      const barWidth = 8 * SCALE;
-      const barHeight = 84 * SCALE; // 7 feet = 84 inches
-      const barOffset = 12 * SCALE; // Distance from field edge (centered in 24" zone)
-      const centerY = canvas.height / 2;
+    // Draw field zones (trenches, ramps, barriers, scoring areas, no-score zone)
+    function drawZones() {
+      for (const zone of config.field.zones) {
+        const minX = zone.bounds.minX * SCALE;
+        const maxX = zone.bounds.maxX * SCALE;
+        const minY = canvas.height - zone.bounds.maxY * SCALE;
+        const maxY = canvas.height - zone.bounds.minY * SCALE;
+        const width = maxX - minX;
+        const height = maxY - minY;
 
-      // Red alliance climb bar (left side, vertical)
-      ctx.fillStyle = '#ef4444';
-      ctx.fillRect(barOffset - barWidth/2, centerY - barHeight/2, barWidth, barHeight);
-      ctx.strokeStyle = '#b91c1c';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(barOffset - barWidth/2, centerY - barHeight/2, barWidth, barHeight);
+        let fillColor = null;
+        let strokeColor = null;
+        let label = null;
 
-      // Level indicators for red (horizontal, to the right of bar)
-      ctx.fillStyle = '#fff';
-      ctx.font = '14px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText('L3', barOffset + 20 * SCALE, centerY - 25 * SCALE + 5);
-      ctx.fillText('L2', barOffset + 20 * SCALE, centerY + 5);
-      ctx.fillText('L1', barOffset + 20 * SCALE, centerY + 25 * SCALE + 5);
+        switch (zone.type) {
+          case 'TRENCH':
+            fillColor = 'rgba(139, 69, 19, 0.4)'; // Brown
+            strokeColor = 'rgba(139, 69, 19, 0.8)';
+            label = 'Trench';
+            break;
+          case 'RAMP':
+            fillColor = 'rgba(128, 128, 128, 0.4)'; // Gray
+            strokeColor = 'rgba(128, 128, 128, 0.8)';
+            // Draw diagonal lines to indicate ramp
+            ctx.fillStyle = fillColor;
+            ctx.fillRect(minX, minY, width, height);
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(minX, minY, width, height);
+            // Diagonal stripes
+            ctx.strokeStyle = 'rgba(100, 100, 100, 0.5)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < width + height; i += 15) {
+              ctx.beginPath();
+              ctx.moveTo(minX + Math.min(i, width), minY + Math.max(0, i - width));
+              ctx.lineTo(minX + Math.max(0, i - height), minY + Math.min(i, height));
+              ctx.stroke();
+            }
+            continue; // Skip default drawing
+          case 'OBSTACLE':
+            fillColor = 'rgba(255, 0, 0, 0.3)'; // Red
+            strokeColor = 'rgba(255, 0, 0, 0.8)';
+            label = 'Barrier';
+            break;
+          case 'SCORING_ZONE':
+            if (zone.modifiers && zone.modifiers.blocksBalls) {
+              fillColor = 'rgba(255, 215, 0, 0.3)'; // Gold
+              strokeColor = 'rgba(255, 215, 0, 0.8)';
+              label = 'Score';
+            }
+            break;
+          case 'CLIMBING':
+            // Don't draw climbing zones here - handled by drawClimbBars
+            continue;
+          case 'NORMAL':
+            if (zone.modifiers && zone.modifiers.noScoring) {
+              // No-score zone - subtle indicator
+              fillColor = 'rgba(100, 100, 100, 0.15)';
+              strokeColor = 'rgba(100, 100, 100, 0.3)';
+              // Draw "NO SCORE" text
+              ctx.fillStyle = fillColor;
+              ctx.fillRect(minX, minY, width, height);
+              ctx.strokeStyle = strokeColor;
+              ctx.lineWidth = 2;
+              ctx.setLineDash([10, 5]);
+              ctx.strokeRect(minX, minY, width, height);
+              ctx.setLineDash([]);
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+              ctx.font = 'bold 24px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText('NO SCORE ZONE', minX + width/2, minY + height/2);
+              continue;
+            }
+            continue; // Skip normal zones without modifiers
+          default:
+            continue;
+        }
 
-      // Horizontal level markers for red
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      ctx.lineWidth = 2;
-      for (let i = -1; i <= 1; i++) {
-        ctx.beginPath();
-        ctx.moveTo(barOffset + 6 * SCALE, centerY + i * 25 * SCALE);
-        ctx.lineTo(barOffset + 16 * SCALE, centerY + i * 25 * SCALE);
-        ctx.stroke();
+        if (fillColor) {
+          ctx.fillStyle = fillColor;
+          ctx.fillRect(minX, minY, width, height);
+        }
+        if (strokeColor) {
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(minX, minY, width, height);
+        }
+        if (label && width > 40 && height > 20) {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+          ctx.font = '12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, minX + width/2, minY + height/2);
+        }
       }
+    }
 
-      // Blue alliance climb bar (right side, vertical)
-      const blueBarX = canvas.width - barOffset;
-      ctx.fillStyle = '#3b82f6';
-      ctx.fillRect(blueBarX - barWidth/2, centerY - barHeight/2, barWidth, barHeight);
-      ctx.strokeStyle = '#1d4ed8';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(blueBarX - barWidth/2, centerY - barHeight/2, barWidth, barHeight);
+    // Draw climb bars based on CLIMBING zones from config
+    function drawClimbBars() {
+      if (!config || !config.field || !config.field.zones) return;
 
-      // Level indicators for blue (horizontal, to the left of bar)
-      ctx.fillStyle = '#fff';
-      ctx.font = '14px sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText('L3', blueBarX - 20 * SCALE, centerY - 25 * SCALE + 5);
-      ctx.fillText('L2', blueBarX - 20 * SCALE, centerY + 5);
-      ctx.fillText('L1', blueBarX - 20 * SCALE, centerY + 25 * SCALE + 5);
+      const climbZones = config.field.zones.filter(z => z.type === 'CLIMBING');
 
-      // Horizontal level markers for blue
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      ctx.lineWidth = 2;
-      for (let i = -1; i <= 1; i++) {
-        ctx.beginPath();
-        ctx.moveTo(blueBarX - 6 * SCALE, centerY + i * 25 * SCALE);
-        ctx.lineTo(blueBarX - 16 * SCALE, centerY + i * 25 * SCALE);
-        ctx.stroke();
+      for (const zone of climbZones) {
+        const minX = zone.bounds.minX * SCALE;
+        const maxX = zone.bounds.maxX * SCALE;
+        const minY = canvas.height - zone.bounds.maxY * SCALE;
+        const maxY = canvas.height - zone.bounds.minY * SCALE;
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        const zoneWidth = maxX - minX;
+        const zoneHeight = maxY - minY;
+
+        // Determine alliance from zone name or modifiers
+        const isRed = zone.name.toLowerCase().includes('red') ||
+                      (zone.modifiers && zone.modifiers.alliance === 'red');
+        const color = isRed ? '#ef4444' : '#3b82f6';
+        const darkColor = isRed ? '#b91c1c' : '#1d4ed8';
+
+        // Draw climbing zone background
+        ctx.fillStyle = color + '30';
+        ctx.fillRect(minX, minY, zoneWidth, zoneHeight);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(minX, minY, zoneWidth, zoneHeight);
+
+        // Draw climb bar (vertical line in center)
+        const barWidth = 6 * SCALE;
+        ctx.fillStyle = color;
+        ctx.fillRect(centerX - barWidth/2, minY + 5, barWidth, zoneHeight - 10);
+        ctx.strokeStyle = darkColor;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(centerX - barWidth/2, minY + 5, barWidth, zoneHeight - 10);
+
+        // Level markers
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = isRed ? 'left' : 'right';
+        const textX = isRed ? centerX + 15 : centerX - 15;
+        ctx.fillText('L3', textX, minY + zoneHeight * 0.2);
+        ctx.fillText('L2', textX, centerY);
+        ctx.fillText('L1', textX, minY + zoneHeight * 0.8);
       }
 
       // Draw climbed robots on bars
@@ -658,11 +761,17 @@
       }
     }
 
-    // Draw robots that have climbed on the bars (vertical orientation)
+    // Draw robots that have climbed on the bars
     function drawClimbedRobots() {
-      const barOffset = 12 * SCALE;
-      const blueBarX = canvas.width - barOffset;
-      const centerY = canvas.height / 2;
+      if (!config || !config.field || !config.field.zones) return;
+
+      const climbZones = config.field.zones.filter(z => z.type === 'CLIMBING');
+
+      // Find red and blue climb zones
+      let redZone = climbZones.find(z => z.name.toLowerCase().includes('red') ||
+                                         (z.modifiers && z.modifiers.alliance === 'red'));
+      let blueZone = climbZones.find(z => z.name.toLowerCase().includes('blue') ||
+                                          (z.modifiers && z.modifiers.alliance === 'blue'));
 
       // Track robots at each level for stacking
       const redLevels = { 1: 0, 2: 0, 3: 0 };
@@ -671,21 +780,30 @@
       for (const robot of gameState.robots) {
         if (robot.hasClimbed || robot.hasAutoClimbed) {
           const isRed = robot.alliance === 'red';
-          const barX = isRed ? barOffset : blueBarX;
+          const zone = isRed ? redZone : blueZone;
+          if (!zone) continue;
+
+          const minX = zone.bounds.minX * SCALE;
+          const maxX = zone.bounds.maxX * SCALE;
+          const minY = canvas.height - zone.bounds.maxY * SCALE;
+          const maxY = canvas.height - zone.bounds.minY * SCALE;
+          const centerX = (minX + maxX) / 2;
+          const zoneHeight = maxY - minY;
+
           const level = robot.currentClimbLevel || 1;
 
           // Vertical offset based on level (L1 at bottom, L3 at top)
-          const levelOffset = (2 - level) * 25 * SCALE; // L1=+25, L2=0, L3=-25
+          const levelY = minY + zoneHeight * (0.8 - (level - 1) * 0.3);
 
           // Track and offset for multiple robots at same level
           const levels = isRed ? redLevels : blueLevels;
-          const stackOffset = levels[level] * 30 * SCALE;
+          const stackOffset = levels[level] * 25;
           levels[level]++;
 
           // Position robots to the side of the bar
-          const xOffset = isRed ? 40 * SCALE + stackOffset : -40 * SCALE - stackOffset;
-          const x = barX + xOffset;
-          const y = centerY + levelOffset;
+          const xOffset = isRed ? 30 + stackOffset : -30 - stackOffset;
+          const x = centerX + xOffset;
+          const y = levelY;
 
           // Draw small robot indicator
           const color = isRed ? '#ef4444' : '#3b82f6';
@@ -693,7 +811,7 @@
           ctx.fillRect(x - 12, y - 12, 24, 24);
 
           ctx.fillStyle = '#fff';
-          ctx.font = 'bold 14px sans-serif';
+          ctx.font = 'bold 12px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(robot.id.split('-')[1] || robot.id, x, y);
@@ -702,7 +820,7 @@
           if (robot.hasAutoClimbed && !robot.hasClimbed) {
             ctx.fillStyle = '#fbbf24';
             ctx.beginPath();
-            ctx.arc(x + 12, y - 12, 6, 0, Math.PI * 2);
+            ctx.arc(x + 12, y - 12, 5, 0, Math.PI * 2);
             ctx.fill();
           }
         }
@@ -771,6 +889,51 @@
       }
     }
 
+    // Draw robot paths
+    function drawPaths() {
+      for (const robot of gameState.robots) {
+        if (!robot.currentPath || robot.currentPath.length < 2) continue;
+
+        const color = robot.alliance === 'red' ? 'rgba(239, 68, 68, 0.5)' : 'rgba(59, 130, 246, 0.5)';
+        const dotColor = robot.alliance === 'red' ? '#ef4444' : '#3b82f6';
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([8, 4]);
+        ctx.beginPath();
+
+        // Start from robot's current position
+        const startX = robot.position.x * SCALE;
+        const startY = canvas.height - robot.position.y * SCALE;
+        ctx.moveTo(startX, startY);
+
+        // Draw path through waypoints
+        for (let i = robot.pathIndex || 0; i < robot.currentPath.length; i++) {
+          const point = robot.currentPath[i];
+          const px = point.x * SCALE;
+          const py = canvas.height - point.y * SCALE;
+          ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Draw target dot at end of path
+        if (robot.currentPath.length > 0) {
+          const target = robot.currentPath[robot.currentPath.length - 1];
+          const tx = target.x * SCALE;
+          const ty = canvas.height - target.y * SCALE;
+
+          ctx.fillStyle = dotColor;
+          ctx.beginPath();
+          ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+    }
+
     // Draw robots
     function drawRobots() {
       for (const robot of gameState.robots) {
@@ -823,14 +986,63 @@
           ctx.fillText(robot.heldBalls.length.toString(), width/2 - 8, -length/2 + 8);
         }
 
-        // Action indicator
+        // Action indicator with target info
         if (robot.currentAction.type !== 'IDLE') {
           ctx.fillStyle = 'rgba(255,255,255,0.8)';
-          ctx.font = '12px sans-serif';
-          ctx.fillText(robot.currentAction.type, 0, length/2 + 16);
+          ctx.font = '11px sans-serif';
+
+          let actionLabel = robot.currentAction.type;
+
+          // Add target info
+          if (robot.currentAction.type === 'SHOOTING' && robot.currentAction.targetScoringZoneId) {
+            actionLabel = 'SHOOT';
+          } else if (robot.currentAction.type === 'PICKING_UP') {
+            actionLabel = 'PICKUP';
+          } else if (robot.currentAction.type === 'CLIMBING') {
+            const level = robot.currentAction.targetClimbLevel || '?';
+            actionLabel = robot.currentAction.isAutoClimb ? 'AUTO-CLIMB' : `CLIMB L${level}`;
+          } else if (robot.currentAction.type === 'MOVING') {
+            actionLabel = 'MOVE';
+          }
+
+          // Show progress bar for non-moving actions
+          if (robot.currentAction.type !== 'MOVING' && robot.currentAction.type !== 'IDLE') {
+            const progress = robot.currentAction.progress || 0;
+            const barWidth = 40;
+            const barHeight = 6;
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(-barWidth/2, length/2 + 8, barWidth, barHeight);
+            ctx.fillStyle = '#4ade80';
+            ctx.fillRect(-barWidth/2, length/2 + 8, barWidth * progress, barHeight);
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(-barWidth/2, length/2 + 8, barWidth, barHeight);
+
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.fillText(actionLabel, 0, length/2 + 26);
+          } else {
+            ctx.fillText(actionLabel, 0, length/2 + 16);
+          }
         }
 
         ctx.restore();
+
+        // Draw target indicator line (outside rotation context)
+        if (robot.currentAction.targetPosition) {
+          const targetX = robot.currentAction.targetPosition.x * SCALE;
+          const targetY = canvas.height - robot.currentAction.targetPosition.y * SCALE;
+
+          // Draw thin line to target
+          const indicatorColor = robot.alliance === 'red' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(59, 130, 246, 0.3)';
+          ctx.strokeStyle = indicatorColor;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(targetX, targetY);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
     }
 

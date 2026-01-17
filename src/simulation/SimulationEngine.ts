@@ -5,6 +5,7 @@ import type {
   Position,
   SimulationConfig,
   StrategyContext,
+  RobotCommand,
 } from '../types/index.js';
 import {
   BallState,
@@ -12,6 +13,9 @@ import {
   RobotActionType,
   SimulationMode,
   DEFAULT_SIMULATION_CONFIG,
+  DecisionRejectionReason,
+  EscapeStrategy,
+  StrategyPriority,
 } from '../types/index.js';
 import { Ball } from '../ball/Ball.js';
 import { updateBallPhysics, isInPickupRange, calculateShotVelocity } from '../ball/BallPhysics.js';
@@ -19,9 +23,27 @@ import { Match } from '../game/Match.js';
 import { AStar } from '../pathfinding/AStar.js';
 import { Robot } from '../robot/Robot.js';
 import { updateRobotMovement, areRobotsColliding, separateRobots } from '../robot/Movement.js';
-import type { Strategy } from '../types/strategy.js';
+import type { Strategy, StrategyDecision } from '../types/strategy.js';
+import type { EvaluatedAction } from '../types/valuation.js';
 import { EventBus, SimulationEvents } from './EventBus.js';
 import { MatchRecorder } from './MatchRecorder.js';
+import { DecisionLogger, type ExecutionResult } from './DecisionLogger.js';
+import { StuckHandler } from './StuckHandler.js';
+import { ActionValuator } from '../strategy/ActionValuator.js';
+
+/**
+ * Fallback state for a robot's decision-making
+ */
+interface FallbackState {
+  /** Ranked list of fallback actions */
+  actions: EvaluatedAction[];
+  /** Index of the next action to try */
+  nextIndex: number;
+  /** Tick when fallbacks were generated */
+  generatedAtTick: number;
+  /** IDs of targets that have been tried and failed */
+  failedTargets: Set<string>;
+}
 
 /**
  * Simulation engine - core tick loop for the simulation
@@ -35,15 +57,26 @@ export class SimulationEngine {
 
   readonly events: EventBus;
   readonly recorder: MatchRecorder;
+  readonly decisionLogger: DecisionLogger;
+  readonly stuckHandler: StuckHandler;
+  readonly actionValuator: ActionValuator;
 
   private running: boolean = false;
   private tickTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  /** Fallback decisions for each robot when primary decision is blocked */
+  private fallbackStates: Map<string, FallbackState> = new Map();
+  /** How long fallbacks remain valid (in ticks) */
+  private readonly FALLBACK_VALIDITY_TICKS = 60; // 1 second
 
   constructor(setup: MatchSetup) {
     this.config = { ...DEFAULT_SIMULATION_CONFIG, ...setup.simulation };
     this.match = new Match(setup.field, this.config);
     this.events = new EventBus();
     this.recorder = new MatchRecorder();
+    this.decisionLogger = new DecisionLogger({ enabled: this.config.recordEvents });
+    this.stuckHandler = new StuckHandler();
+    this.actionValuator = new ActionValuator();
 
     // Initialize field balls first, then robots (which add starting balls)
     this.match.initializeBalls();
@@ -88,10 +121,13 @@ export class SimulationEngine {
           velocity: { vx: 0, vy: 0, vz: 0 },
           heldByRobotId: robot.id,
           shotByRobotId: null,
+          shotFromPosition: null,
           targetPosition: null,
           spawnPointId: `robot-start-${robot.id}`,
           alliance: null,
           lastUpdateTick: 0,
+          claimedByRobotId: null,
+          claimedAtTick: null,
         });
         this.match.addBall(ball);
         robot.pickUpBall(ballId);
@@ -105,18 +141,19 @@ export class SimulationEngine {
   }
 
   /**
-   * Initialize pathfinders for each robot height
+   * Initialize pathfinders for each robot size (height + width combination)
    */
   private initializePathfinders(): void {
-    const heights = new Set<number>();
+    const robotSizes = new Set<string>();
     for (const robot of this.match.getRobots()) {
-      heights.add(robot.config.height);
+      robotSizes.add(`${robot.config.height}-${robot.config.width}`);
     }
 
-    for (const height of heights) {
+    for (const sizeKey of robotSizes) {
+      const [height, width] = sizeKey.split('-').map(Number);
       this.pathfinders.set(
-        height.toString(),
-        new AStar(this.match.field, { robotHeight: height })
+        sizeKey,
+        new AStar(this.match.field, { robotHeight: height, robotWidth: width })
       );
     }
   }
@@ -132,8 +169,11 @@ export class SimulationEngine {
    * Get pathfinder for a robot
    */
   private getPathfinder(robot: Robot): AStar {
-    const key = robot.config.height.toString();
-    return this.pathfinders.get(key) ?? new AStar(this.match.field);
+    const key = `${robot.config.height}-${robot.config.width}`;
+    return this.pathfinders.get(key) ?? new AStar(this.match.field, {
+      robotHeight: robot.config.height,
+      robotWidth: robot.config.width,
+    });
   }
 
   /**
@@ -150,6 +190,7 @@ export class SimulationEngine {
     this.running = true;
     this.match.start();
     this.recorder.start();
+    this.decisionLogger.initializeLogFile(); // Wipe and initialize log file
     this.events.emit(SimulationEvents.MATCH_START, { tick: 0 });
 
     if (this.config.mode === SimulationMode.HEADLESS) {
@@ -222,11 +263,20 @@ export class SimulationEngine {
     // Handle robot collisions
     this.handleCollisions();
 
+    // Handle robot-ball collisions (push balls out of the way)
+    this.handleRobotBallCollisions();
+
+    // Handle ball-ball collisions (prevent overlapping)
+    this.handleBallBallCollisions();
+
     // Update ball physics
     this.updateBalls(deltaTime);
 
     // Process ball respawns
     this.match.processBallRespawns();
+
+    // Expire old ball claims
+    this.expireBallClaims();
 
     // Process pickups
     this.processPickups();
@@ -253,12 +303,111 @@ export class SimulationEngine {
     }
   }
 
+  // Track when robots last replanned to avoid constant replanning
+  private lastReplanTick: Map<string, number> = new Map();
+  private lastPhase: string = '';
+  private minReplanInterval: number = 30; // Minimum ticks between replans (0.5 seconds)
+
+  /**
+   * Check if a robot needs to replan
+   */
+  private needsReplan(robot: Robot): boolean {
+    // Climbed robots (endgame) don't need to replan - they're done
+    if (robot.hasClimbed) {
+      return false;
+    }
+
+    // Always replan if idle
+    if (robot.isIdle()) return true;
+
+    // Check if phase changed (scoring opportunities may have changed)
+    const currentPhase = this.match.clock.phase;
+    if (currentPhase !== this.lastPhase) {
+      return true;
+    }
+
+    // Check if stuck (but not for climbing robots - they're doing a mission)
+    if (robot.currentAction.type !== RobotActionType.CLIMBING &&
+        this.stuckHandler.isStuck(robot.id)) {
+      return true;
+    }
+
+    // Check if target ball is still available (for pickup-related movement)
+    if (this.isTargetBallInvalid(robot)) {
+      return true;
+    }
+
+    // Check minimum interval since last replan
+    const lastReplan = this.lastReplanTick.get(robot.id) ?? 0;
+    const ticksSinceReplan = this.match.clock.tick - lastReplan;
+    if (ticksSinceReplan < this.minReplanInterval) {
+      return false;
+    }
+
+    // For moving robots, check if their target is still valid
+    if (robot.isMoving()) {
+      // Don't interrupt movement unless there's a good reason
+      // The path is already computed and being followed
+      return false;
+    }
+
+    // For robots in the middle of an action (shooting, picking up, climbing), don't interrupt
+    if (robot.currentAction.type !== RobotActionType.IDLE &&
+        robot.currentAction.type !== RobotActionType.MOVING) {
+      return false;
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if the robot's target ball is no longer available
+   */
+  private isTargetBallInvalid(robot: Robot): boolean {
+    const action = robot.currentAction;
+
+    // Check if robot was going to pick up a ball
+    if (action.targetBallId || action.targetBallIds) {
+      const ballIds = action.targetBallIds ?? (action.targetBallId ? [action.targetBallId] : []);
+
+      for (const ballId of ballIds) {
+        const ball = this.match.getBall(ballId);
+        // Ball is invalid if it doesn't exist, is held by someone else, or is scored
+        if (!ball || !ball.isAvailable()) {
+          // Check if it's held by THIS robot (that's fine)
+          if (ball && ball.isHeld() && ball.data.heldByRobotId === robot.id) {
+            continue;
+          }
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   /**
    * Update all robot strategies
    */
   private updateStrategies(): void {
+    // Track phase changes
+    const currentPhase = this.match.clock.phase;
+    const phaseChanged = currentPhase !== this.lastPhase;
+    this.lastPhase = currentPhase;
+
     for (const robot of this.match.getRobots()) {
       if (robot.isDisabled) continue;
+
+      // Skip climbed robots entirely - they're done for the match
+      if (robot.hasClimbed) {
+        this.stuckHandler.clearState(robot.id); // Clear any stuck tracking
+        continue;
+      }
+
+      // Skip strategy update if robot doesn't need replanning
+      if (!this.needsReplan(robot) && !phaseChanged) {
+        continue;
+      }
 
       const strategyId = this.robotStrategies.get(robot.id);
       if (!strategyId) continue;
@@ -269,8 +418,194 @@ export class SimulationEngine {
       const context = this.buildStrategyContext(robot);
       const decision = strategy.decide(context);
 
-      this.executeCommand(robot, decision.command);
+      // Record replan time
+      this.lastReplanTick.set(robot.id, this.match.clock.tick);
+
+      // Execute command and track result
+      let result = this.executeCommandWithTracking(robot, decision.command);
+
+      // Log the primary decision
+      this.decisionLogger.logDecision(
+        this.match.clock.tick,
+        robot.cloneState(),
+        strategyId,
+        decision,
+        result
+      );
+
+      // If primary decision failed with a blockable reason, try fallbacks
+      if (!result.executed && this.isBlockableRejection(result.reason)) {
+        const fallbackResult = this.tryFallbackDecisions(robot, context, strategyId, decision);
+        if (fallbackResult) {
+          result = fallbackResult;
+        }
+      }
+
+      // Clear fallbacks on successful execution
+      if (result.executed) {
+        this.clearFallbackState(robot.id);
+      }
+
+      // Emit events for rejected decisions
+      if (!result.executed && result.reason) {
+        this.events.emit(SimulationEvents.DECISION_REJECTED, {
+          robotId: robot.id,
+          reason: result.reason,
+          decision: {
+            commandType: decision.command.type,
+            reason: decision.reason,
+          },
+        });
+      }
     }
+  }
+
+  /**
+   * Check if a rejection reason means we should try fallbacks
+   */
+  private isBlockableRejection(reason?: DecisionRejectionReason): boolean {
+    if (!reason) return false;
+    return [
+      DecisionRejectionReason.NO_PATH_FOUND,
+      DecisionRejectionReason.BALL_NOT_AVAILABLE,
+      DecisionRejectionReason.NOT_IN_CLIMB_ZONE,
+    ].includes(reason);
+  }
+
+  /**
+   * Try fallback decisions when primary decision is blocked
+   */
+  private tryFallbackDecisions(
+    robot: Robot,
+    context: StrategyContext,
+    strategyId: string,
+    primaryDecision: StrategyDecision
+  ): ExecutionResult | null {
+    const currentTick = this.match.clock.tick;
+    let fallbackState = this.fallbackStates.get(robot.id);
+
+    // Generate new fallbacks if needed
+    if (!fallbackState ||
+        currentTick - fallbackState.generatedAtTick > this.FALLBACK_VALIDITY_TICKS) {
+      fallbackState = this.generateFallbacks(robot, context);
+      this.fallbackStates.set(robot.id, fallbackState);
+    }
+
+    // Mark the primary decision's target as failed
+    const primaryTargetId = this.getTargetId(primaryDecision);
+    if (primaryTargetId) {
+      fallbackState.failedTargets.add(primaryTargetId);
+    }
+
+    // Try each fallback action
+    while (fallbackState.nextIndex < fallbackState.actions.length) {
+      const action = fallbackState.actions[fallbackState.nextIndex];
+      fallbackState.nextIndex++;
+
+      // Skip if this target already failed
+      if (action.targetId && fallbackState.failedTargets.has(action.targetId)) {
+        continue;
+      }
+
+      // Skip IDLE actions (not useful as fallbacks)
+      if (action.actionType === RobotActionType.IDLE) {
+        continue;
+      }
+
+      // Convert to decision and try to execute
+      const fallbackDecision = this.evaluatedActionToDecision(action);
+      const result = this.executeCommandWithTracking(robot, fallbackDecision.command);
+
+      // Log the fallback attempt
+      this.decisionLogger.logDecision(
+        currentTick,
+        robot.cloneState(),
+        `${strategyId}-fallback`,
+        fallbackDecision,
+        result
+      );
+
+      if (result.executed) {
+        return result;
+      }
+
+      // Mark this target as failed too
+      if (action.targetId) {
+        fallbackState.failedTargets.add(action.targetId);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Generate fallback actions for a robot
+   */
+  private generateFallbacks(_robot: Robot, context: StrategyContext): FallbackState {
+    const actions = this.actionValuator.evaluateAllActions(context);
+
+    return {
+      actions,
+      nextIndex: 0,
+      generatedAtTick: this.match.clock.tick,
+      failedTargets: new Set(),
+    };
+  }
+
+  /**
+   * Get target ID from a decision for deduplication
+   */
+  private getTargetId(decision: StrategyDecision): string | null {
+    const cmd = decision.command;
+    if (cmd.targetBallId) return `ball:${cmd.targetBallId}`;
+    if (cmd.targetScoringZoneId) return `score:${cmd.targetScoringZoneId}`;
+    if (cmd.targetPosition) return `pos:${Math.round(cmd.targetPosition.x)},${Math.round(cmd.targetPosition.y)}`;
+    return null;
+  }
+
+  /**
+   * Convert an evaluated action to a strategy decision
+   */
+  private evaluatedActionToDecision(action: EvaluatedAction): StrategyDecision {
+    const command: RobotCommand = {
+      type: action.actionType,
+    };
+
+    if (action.targetPosition) {
+      command.targetPosition = action.targetPosition;
+    }
+
+    if (action.targetId) {
+      switch (action.actionType) {
+        case RobotActionType.PICKING_UP:
+          command.targetBallId = action.targetId;
+          break;
+        case RobotActionType.SHOOTING:
+          command.targetScoringZoneId = action.targetId;
+          break;
+        case RobotActionType.CLIMBING:
+          if (action.targetId.startsWith('climb-level-')) {
+            command.targetClimbLevel = parseInt(action.targetId.replace('climb-level-', ''));
+            command.isAutoClimb = false;
+          } else {
+            command.isAutoClimb = true;
+          }
+          break;
+      }
+    }
+
+    return {
+      command,
+      priority: StrategyPriority.MEDIUM,
+      reason: `Fallback: ${action.explanation}`,
+    };
+  }
+
+  /**
+   * Clear fallback state for a robot
+   */
+  private clearFallbackState(robotId: string): void {
+    this.fallbackStates.delete(robotId);
   }
 
   /**
@@ -285,9 +620,27 @@ export class SimulationEngine {
     const opponents = this.match
       .getRobotsByAlliance(robot.alliance === 'red' ? 'blue' : 'red')
       .map((r) => r.cloneState());
-    const availableBalls = this.match
-      .getAvailableBalls()
-      .map((b) => b.cloneData());
+    const currentTick = this.match.clock.tick;
+
+    // Get available balls and filter unclaimed ones for alliance coordination
+    const availableBallObjects = this.match.getAvailableBalls();
+    const availableBalls = availableBallObjects.map((b) => b.cloneData());
+
+    // Get teammate IDs for claim checking
+    const teammateIds = new Set(teammates.map(t => t.id));
+
+    // Unclaimed balls: available and not claimed by a teammate (or claim expired)
+    // A ball claimed by this robot counts as unclaimed for this robot
+    const unclaimedBallObjects = availableBallObjects.filter((b) => {
+      const claimingRobotId = b.getClaimingRobotId();
+      if (claimingRobotId === null) return true; // Not claimed
+      if (claimingRobotId === robot.id) return true; // Claimed by this robot
+      if (!teammateIds.has(claimingRobotId)) return true; // Claimed by opponent (doesn't matter)
+      if (b.isClaimExpired(currentTick)) return true; // Claim expired
+      return false; // Claimed by a teammate
+    });
+    const unclaimedBalls = unclaimedBallObjects.map((b) => b.cloneData());
+
     const teammateBalls = this.match
       .getBalls()
       .filter(
@@ -306,6 +659,17 @@ export class SimulationEngine {
       if (nearestBallDistance === null || dist < nearestBallDistance) {
         nearestBallDistance = dist;
         nearestBall = ball;
+      }
+    }
+
+    // Find nearest unclaimed ball (for coordination)
+    let nearestUnclaimedBall = null;
+    let nearestUnclaimedBallDistance: number | null = null;
+    for (const ball of unclaimedBalls) {
+      const dist = robot.distanceTo(ball.position);
+      if (nearestUnclaimedBallDistance === null || dist < nearestUnclaimedBallDistance) {
+        nearestUnclaimedBallDistance = dist;
+        nearestUnclaimedBall = ball;
       }
     }
 
@@ -363,6 +727,14 @@ export class SimulationEngine {
       }
     }
 
+    // Check shooting position quality
+    const hasClearShotPath = nearestScoringTarget
+      ? this.match.field.hasClearShotPath(robot.position, nearestScoringTarget.position)
+      : false;
+    const isGoodShootingPosition = this.match.field.isGoodShootingPosition(robot.position);
+    const isOnOwnSide = this.match.field.isOnAllianceSide(robot.position, robot.alliance);
+    const isInNoScoreZone = this.match.field.isInNoScoreZone(robot.position);
+
     return {
       gameState: state,
       robot: robot.cloneState(),
@@ -370,10 +742,13 @@ export class SimulationEngine {
       teammates,
       opponents,
       availableBalls,
+      unclaimedBalls,
       teammateBalls,
       scoringTargets,
       nearestBallDistance,
       nearestBall,
+      nearestUnclaimedBallDistance,
+      nearestUnclaimedBall,
       nearestScoringTargetDistance,
       nearestScoringTarget,
       inShootingRange,
@@ -389,86 +764,163 @@ export class SimulationEngine {
       allianceEndgameClimbCount,
       isNearClimbingZone,
       climbingZonePosition,
+      hasClearShotPath,
+      isGoodShootingPosition,
+      isOnOwnSide,
+      isInNoScoreZone,
     };
   }
 
   /**
-   * Execute a robot command
+   * Execute a robot command and return tracking result
    */
-  private executeCommand(
+  private executeCommandWithTracking(
     robot: Robot,
-    command: {
-      type: RobotActionType;
-      targetPosition?: Position;
-      targetBallId?: string;
-      targetScoringZoneId?: string;
-      targetClimbLevel?: number;
-      isAutoClimb?: boolean;
+    command: RobotCommand
+  ): ExecutionResult {
+    if (robot.isDisabled) {
+      return { executed: false, reason: DecisionRejectionReason.ROBOT_DISABLED };
     }
-  ): void {
-    if (robot.isDisabled) return;
 
-    // Allow certain action transitions
+    // Check if robot is busy
     if (!robot.isIdle()) {
-      // Allow transitioning from MOVING to PICKING_UP or SHOOTING when in range
+      // Allow certain action transitions
       if (robot.isMoving()) {
         if (command.type === RobotActionType.PICKING_UP || command.type === RobotActionType.SHOOTING) {
-          // Interrupt movement to pick up ball or shoot
-          robot.completeAction();
+          // Continue with execution below
         } else {
-          return;
+          return { executed: false, reason: DecisionRejectionReason.ROBOT_BUSY };
         }
       } else {
-        return;
+        return { executed: false, reason: DecisionRejectionReason.ROBOT_BUSY };
       }
     }
 
     switch (command.type) {
       case RobotActionType.MOVING:
-        if (command.targetPosition && robot.isIdle()) {
-          const pathfinder = this.getPathfinder(robot);
-          const result = pathfinder.findPath(robot.position, command.targetPosition);
-          if (result.found) {
-            robot.setPath(result.path);
-            robot.startAction(command, this.match.clock.tick);
-          }
+        if (!command.targetPosition) {
+          return { executed: false, reason: DecisionRejectionReason.NO_TARGET_POSITION };
         }
-        break;
+        if (!robot.isIdle()) {
+          return { executed: false, reason: DecisionRejectionReason.ROBOT_BUSY };
+        }
+        {
+          const pathfinder = this.getPathfinder(robot);
+          // Separate friendly and opponent robots for different obstacle radii
+          const allOtherRobots = this.match
+            .getRobots()
+            .filter((r) => r.id !== robot.id && !r.hasClimbed);
+          const friendlyPositions = allOtherRobots
+            .filter((r) => r.alliance === robot.alliance)
+            .map((r) => r.position);
+          const opponentPositions = allOtherRobots
+            .filter((r) => r.alliance !== robot.alliance)
+            .map((r) => r.position);
+          // Use larger bubble for friendly robots to prevent getting stuck on them
+          pathfinder.setDynamicObstaclesWithAlliances(
+            friendlyPositions,
+            opponentPositions,
+            robot.config.width * 1.5, // Friendly: 1.5x robot width
+            robot.config.width        // Opponent: standard width
+          );
+          const result = pathfinder.findPath(robot.position, command.targetPosition);
+          pathfinder.clearDynamicObstacles();
+
+          if (!result.found) {
+            return { executed: false, reason: DecisionRejectionReason.NO_PATH_FOUND };
+          }
+          robot.setPath(result.path);
+          robot.startAction(command, this.match.clock.tick);
+          return { executed: true };
+        }
 
       case RobotActionType.SHOOTING:
-        if (robot.hasBalls() && command.targetScoringZoneId && robot.isIdle()) {
-          robot.startAction(command, this.match.clock.tick);
+        if (!robot.hasBalls()) {
+          return { executed: false, reason: DecisionRejectionReason.NO_BALLS_TO_SHOOT };
         }
-        break;
+        if (!command.targetScoringZoneId) {
+          return { executed: false, reason: DecisionRejectionReason.NO_TARGET_SCORING_ZONE };
+        }
+        if (!robot.isIdle() && !robot.isMoving()) {
+          return { executed: false, reason: DecisionRejectionReason.ROBOT_BUSY };
+        }
+        // Interrupt movement if moving
+        if (robot.isMoving()) {
+          robot.completeAction();
+        }
+        robot.startAction(command, this.match.clock.tick);
+        return { executed: true };
 
       case RobotActionType.PICKING_UP:
-        if (robot.canPickUpBall() && command.targetBallId && robot.isIdle()) {
-          robot.startAction(command, this.match.clock.tick);
+        if (!robot.canPickUpBall()) {
+          return { executed: false, reason: DecisionRejectionReason.BALL_CAPACITY_FULL };
         }
-        break;
+        if (!command.targetBallId && !command.targetBallIds) {
+          return { executed: false, reason: DecisionRejectionReason.NO_TARGET_BALL };
+        }
+        if (!robot.isIdle() && !robot.isMoving()) {
+          return { executed: false, reason: DecisionRejectionReason.ROBOT_BUSY };
+        }
+        // Interrupt movement if moving
+        if (robot.isMoving()) {
+          robot.completeAction();
+        }
+        {
+          const ballIds = command.targetBallIds ?? (command.targetBallId ? [command.targetBallId] : []);
+          for (const ballId of ballIds) {
+            const ballToClaim = this.match.getBall(ballId);
+            if (ballToClaim) {
+              ballToClaim.claim(robot.id, this.match.clock.tick);
+            }
+          }
+          robot.startAction(command, this.match.clock.tick);
+          return { executed: true };
+        }
 
       case RobotActionType.CLIMBING:
-        // Robot must be near their alliance's climbing zone to climb
         if (!this.match.field.isNearClimbingZone(robot.position, robot.alliance)) {
-          break; // Can't climb - not near climbing zone
+          return { executed: false, reason: DecisionRejectionReason.NOT_IN_CLIMB_ZONE };
         }
-
-        // Auto climb: during AUTO phase, robot must have autoClimb capability
-        if (command.isAutoClimb && robot.config.autoClimb && this.match.clock.isAuto() && robot.isIdle()) {
+        if (command.isAutoClimb) {
+          if (!robot.config.autoClimb) {
+            return { executed: false, reason: DecisionRejectionReason.NO_AUTO_CLIMB_CAPABILITY };
+          }
+          if (!this.match.clock.isAuto()) {
+            return { executed: false, reason: DecisionRejectionReason.WRONG_PHASE };
+          }
+          if (!this.match.scoring.canAutoClimb(robot.alliance)) {
+            return { executed: false, reason: DecisionRejectionReason.CLIMB_SLOTS_FULL };
+          }
+          if (!robot.isIdle()) {
+            return { executed: false, reason: DecisionRejectionReason.ROBOT_BUSY };
+          }
           robot.startAction(command, this.match.clock.tick);
-        }
-        // Endgame climb: during ENDGAME phase, robot must have canClimb capability
-        else if (!command.isAutoClimb && robot.config.canClimb && this.match.clock.isEndgame() && robot.isIdle()) {
+          return { executed: true };
+        } else {
+          if (!robot.config.canClimb) {
+            return { executed: false, reason: DecisionRejectionReason.NO_CLIMB_CAPABILITY };
+          }
+          if (!this.match.clock.isEndgame()) {
+            return { executed: false, reason: DecisionRejectionReason.WRONG_PHASE };
+          }
+          if (!this.match.scoring.canEndgameClimb(robot.alliance)) {
+            return { executed: false, reason: DecisionRejectionReason.CLIMB_SLOTS_FULL };
+          }
+          if (!robot.isIdle()) {
+            return { executed: false, reason: DecisionRejectionReason.ROBOT_BUSY };
+          }
           robot.startAction(command, this.match.clock.tick);
+          return { executed: true };
         }
-        break;
 
       case RobotActionType.IDLE:
-        // Only go idle if explicitly commanded
         if (robot.currentAction.type !== RobotActionType.IDLE) {
           robot.completeAction();
         }
-        break;
+        return { executed: true };
+
+      default:
+        return { executed: false, reason: DecisionRejectionReason.ROBOT_BUSY };
     }
   }
 
@@ -501,6 +953,9 @@ export class SimulationEngine {
     }
   }
 
+  // Legacy stuck tracking (now handled by StuckHandler)
+  private lastPositions: Map<string, Position> = new Map();
+
   /**
    * Update robot movement along path
    */
@@ -517,11 +972,162 @@ export class SimulationEngine {
     robot.setHeading(result.heading);
     robot.setVelocity(result.velocity);
 
+    // Track last position for reference
+    this.lastPositions.set(robot.id, { ...robot.position });
+
+    // Use StuckHandler for stuck detection and escape
+    const otherRobots = this.match.getRobots()
+      .filter((r) => r.id !== robot.id)
+      .map((r) => r.cloneState());
+
+    const escapeAction = this.stuckHandler.update(
+      robot.cloneState(),
+      this.match.clock.tick,
+      result.blocked,
+      this.match.field,
+      otherRobots
+    );
+
+    if (escapeAction) {
+      // Emit stuck event
+      if (this.stuckHandler.isStuck(robot.id)) {
+        const stuckState = this.stuckHandler.getState(robot.id);
+        this.events.emit(SimulationEvents.ROBOT_STUCK, {
+          robotId: robot.id,
+          stuckTicks: stuckState?.stuckTicks ?? 0,
+          strategy: escapeAction.strategy,
+        });
+      }
+
+      // Handle escape action
+      this.handleEscapeAction(robot, escapeAction);
+    }
+
     if (result.reachedTarget) {
       const nextTarget = robot.advancePath();
       if (!nextTarget) {
         robot.completeAction();
+        this.stuckHandler.clearState(robot.id);
         this.events.emit(SimulationEvents.ROBOT_ARRIVED, { robotId: robot.id });
+      }
+    }
+  }
+
+  /**
+   * Handle an escape action from the StuckHandler
+   */
+  private handleEscapeAction(
+    robot: Robot,
+    escapeAction: { strategy: EscapeStrategy; targetPosition?: Position; abandonCurrentAction: boolean }
+  ): void {
+    this.events.emit(SimulationEvents.ROBOT_ESCAPE, {
+      robotId: robot.id,
+      strategy: escapeAction.strategy,
+    });
+
+    if (escapeAction.abandonCurrentAction) {
+      // Give up on current target entirely
+      robot.completeAction();
+      this.stuckHandler.clearState(robot.id);
+      return;
+    }
+
+    switch (escapeAction.strategy) {
+      case EscapeStrategy.REPATH:
+        this.rePathRobot(robot);
+        break;
+
+      case EscapeStrategy.PERPENDICULAR_LEFT:
+      case EscapeStrategy.PERPENDICULAR_RIGHT:
+      case EscapeStrategy.BACKWARD:
+      case EscapeStrategy.RANDOM_DIRECTION:
+        if (escapeAction.targetPosition) {
+          this.escapeToPosition(robot, escapeAction.targetPosition);
+        }
+        break;
+
+      case EscapeStrategy.ABANDON_TARGET:
+        robot.completeAction();
+        this.stuckHandler.clearState(robot.id);
+        break;
+    }
+  }
+
+  /**
+   * Escape to a specific position, then continue to original target
+   */
+  private escapeToPosition(robot: Robot, escapePosition: Position): void {
+    const currentAction = robot.currentAction;
+    if (currentAction.type !== RobotActionType.MOVING || !currentAction.targetPosition) {
+      return;
+    }
+
+    const pathfinder = this.getPathfinder(robot);
+    const originalTarget = currentAction.targetPosition;
+
+    // Try to find path: current -> escape -> original target
+    const toEscape = pathfinder.findPath(robot.position, escapePosition);
+    if (toEscape.found && toEscape.path.length > 0) {
+      const fromEscape = pathfinder.findPath(escapePosition, originalTarget);
+      if (fromEscape.found && fromEscape.path.length > 0) {
+        // Combine paths
+        const combinedPath = [...toEscape.path, ...fromEscape.path.slice(1)];
+        robot.setPath(combinedPath);
+        return;
+      }
+    }
+
+    // If escape path failed, mark strategy as failed and try repath
+    this.stuckHandler.markStrategyFailed(
+      robot.id,
+      EscapeStrategy.PERPENDICULAR_LEFT // Mark as generic perpendicular failure
+    );
+    this.rePathRobot(robot);
+  }
+
+  /**
+   * Attempt to re-path a stuck robot
+   */
+  private rePathRobot(robot: Robot): void {
+    const currentAction = robot.currentAction;
+    if (currentAction.type !== RobotActionType.MOVING || !currentAction.targetPosition) {
+      robot.completeAction();
+      return;
+    }
+
+    const pathfinder = this.getPathfinder(robot);
+
+    // Separate friendly and opponent robots for different obstacle radii
+    const allOtherRobots = this.match
+      .getRobots()
+      .filter((r) => r.id !== robot.id && !r.hasClimbed);
+    const friendlyPositions = allOtherRobots
+      .filter((r) => r.alliance === robot.alliance)
+      .map((r) => r.position);
+    const opponentPositions = allOtherRobots
+      .filter((r) => r.alliance !== robot.alliance)
+      .map((r) => r.position);
+    // Use larger bubble for friendly robots
+    pathfinder.setDynamicObstaclesWithAlliances(
+      friendlyPositions,
+      opponentPositions,
+      robot.config.width * 1.5,
+      robot.config.width
+    );
+
+    const result = pathfinder.findPath(robot.position, currentAction.targetPosition);
+    pathfinder.clearDynamicObstacles();
+
+    if (result.found && result.path.length > 0) {
+      robot.setPath(result.path);
+    } else {
+      // Try again without dynamic obstacles (maybe can push through)
+      const fallbackResult = pathfinder.findPath(robot.position, currentAction.targetPosition);
+      if (fallbackResult.found && fallbackResult.path.length > 0) {
+        robot.setPath(fallbackResult.path);
+      } else {
+        // Can't find a path - give up on this movement
+        robot.completeAction();
       }
     }
   }
@@ -586,8 +1192,14 @@ export class SimulationEngine {
     robot.updateProgress(progress);
 
     if (progress >= 1) {
-      const ballId = robot.currentAction.targetBallId;
-      if (ballId) {
+      // Support multi-ball pickup
+      const ballIds = robot.currentAction.targetBallIds ??
+        (robot.currentAction.targetBallId ? [robot.currentAction.targetBallId] : []);
+
+      for (const ballId of ballIds) {
+        // Check if robot still has capacity
+        if (!robot.canPickUpBall()) break;
+
         const ball = this.match.getBall(ballId);
         // Use a larger tolerance (24") for completion check to account for collisions pushing robot
         if (ball && ball.isAvailable() && isInPickupRange(robot.position, ball.position, 24)) {
@@ -678,15 +1290,192 @@ export class SimulationEngine {
     for (let i = 0; i < robots.length; i++) {
       for (let j = i + 1; j < robots.length; j++) {
         if (areRobotsColliding(robots[i], robots[j])) {
-          const { pos1, pos2 } = separateRobots(robots[i], robots[j]);
+          const { pos1, pos2 } = separateRobots(robots[i], robots[j], this.match.field);
           robots[i].setPosition(pos1);
           robots[j].setPosition(pos2);
+
+          // StuckHandler will detect stuck status via position history tracking
+          // Collisions that prevent movement will naturally show up as stuck
 
           this.events.emit(SimulationEvents.ROBOT_COLLISION, {
             robot1Id: robots[i].id,
             robot2Id: robots[j].id,
           });
         }
+      }
+    }
+  }
+
+  /**
+   * Handle robot-ball collisions - push balls out of the way when robots drive into them
+   */
+  private handleRobotBallCollisions(): void {
+    const robots = this.match.getRobots();
+    const balls = this.match.getBalls();
+    const ballRadius = this.config.ballPhysics.radius;
+
+    for (const robot of robots) {
+      if (robot.isDisabled || robot.hasClimbed) continue;
+
+      // Calculate robot collision radius - must be smaller than pickup range (12") minus ball radius
+      // so balls can get close enough to be collected before being pushed away
+      // Use half the robot's length minus a buffer, capped to ensure it's smaller than pickup range
+      const pickupRange = 12; // matches the pickup detection range
+      const maxCollisionRadius = pickupRange - ballRadius - 1; // Must be smaller than pickup range
+      const robotRadius = Math.min(robot.config.length / 2 - 4, maxCollisionRadius);
+
+      for (const ball of balls) {
+        // Only affect balls on the field (not held, in flight, or scored)
+        if (!ball.isAvailable()) continue;
+
+        const dx = ball.position.x - robot.position.x;
+        const dy = ball.position.y - robot.position.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const collisionDistance = robotRadius + ballRadius;
+
+        // Check if ball is within collision range
+        if (distance < collisionDistance && distance > 0) {
+          // Calculate push direction (away from robot)
+          const pushDirX = dx / distance;
+          const pushDirY = dy / distance;
+
+          // Calculate overlap amount
+          const overlap = collisionDistance - distance;
+
+          // Push ball out of the way
+          const pushSpeed = Math.max(50, robot.velocity * 0.5); // At least 50 in/s or half robot speed
+          const newBallPos = {
+            x: ball.position.x + pushDirX * (overlap + 5), // Push out plus buffer
+            y: ball.position.y + pushDirY * (overlap + 5),
+          };
+
+          // Clamp to field bounds (ball radius away from walls)
+          newBallPos.x = Math.max(ballRadius + 1, Math.min(this.match.field.config.width - ballRadius - 1, newBallPos.x));
+          newBallPos.y = Math.max(ballRadius + 1, Math.min(this.match.field.config.height - ballRadius - 1, newBallPos.y));
+
+          ball.setPosition(newBallPos);
+
+          // Give ball some velocity in the push direction
+          ball.setVelocity({
+            vx: pushDirX * pushSpeed,
+            vy: pushDirY * pushSpeed,
+            vz: 0,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Handle ball-ball collisions - push overlapping balls apart
+   */
+  private handleBallBallCollisions(): void {
+    const balls = this.match.getBalls();
+    const ballRadius = this.config.ballPhysics.radius;
+    const minDistance = ballRadius * 2; // Minimum distance between ball centers
+    const fieldWidth = this.match.field.config.width;
+    const fieldHeight = this.match.field.config.height;
+
+    // Check all pairs of available balls
+    for (let i = 0; i < balls.length; i++) {
+      const ballA = balls[i];
+      if (!ballA.isAvailable()) continue;
+
+      for (let j = i + 1; j < balls.length; j++) {
+        const ballB = balls[j];
+        if (!ballB.isAvailable()) continue;
+
+        const dx = ballB.position.x - ballA.position.x;
+        const dy = ballB.position.y - ballA.position.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // If balls are overlapping (closer than minDistance)
+        if (distance < minDistance && distance > 0) {
+          // Calculate separation direction
+          const nx = dx / distance;
+          const ny = dy / distance;
+
+          // Calculate how much to separate (half overlap each)
+          const overlap = minDistance - distance;
+          const separationAmount = (overlap / 2) + 0.5; // Small buffer
+
+          // Move each ball away from the other
+          const newPosA = {
+            x: ballA.position.x - nx * separationAmount,
+            y: ballA.position.y - ny * separationAmount,
+          };
+          const newPosB = {
+            x: ballB.position.x + nx * separationAmount,
+            y: ballB.position.y + ny * separationAmount,
+          };
+
+          // Clamp to field bounds
+          newPosA.x = Math.max(ballRadius + 1, Math.min(fieldWidth - ballRadius - 1, newPosA.x));
+          newPosA.y = Math.max(ballRadius + 1, Math.min(fieldHeight - ballRadius - 1, newPosA.y));
+          newPosB.x = Math.max(ballRadius + 1, Math.min(fieldWidth - ballRadius - 1, newPosB.x));
+          newPosB.y = Math.max(ballRadius + 1, Math.min(fieldHeight - ballRadius - 1, newPosB.y));
+
+          ballA.setPosition(newPosA);
+          ballB.setPosition(newPosB);
+
+          // Transfer velocity between balls (simple elastic collision approximation)
+          const velA = ballA.velocity;
+          const velB = ballB.velocity;
+
+          // Calculate relative velocity along normal
+          const dvx = velA.vx - velB.vx;
+          const dvy = velA.vy - velB.vy;
+          const dvn = dvx * nx + dvy * ny;
+
+          // Only separate if balls are approaching
+          if (dvn > 0) {
+            // Exchange velocity components along normal
+            const impulseFactor = 0.8; // Coefficient of restitution
+            const impulse = dvn * impulseFactor;
+
+            ballA.setVelocity({
+              vx: velA.vx - impulse * nx,
+              vy: velA.vy - impulse * ny,
+              vz: velA.vz,
+            });
+            ballB.setVelocity({
+              vx: velB.vx + impulse * nx,
+              vy: velB.vy + impulse * ny,
+              vz: velB.vz,
+            });
+          }
+        } else if (distance === 0) {
+          // Balls are exactly at same position - push apart randomly
+          const angle = Math.random() * Math.PI * 2;
+          const offsetX = Math.cos(angle) * (minDistance / 2 + 1);
+          const offsetY = Math.sin(angle) * (minDistance / 2 + 1);
+
+          const newPosA = {
+            x: Math.max(ballRadius + 1, Math.min(fieldWidth - ballRadius - 1, ballA.position.x - offsetX)),
+            y: Math.max(ballRadius + 1, Math.min(fieldHeight - ballRadius - 1, ballA.position.y - offsetY)),
+          };
+          const newPosB = {
+            x: Math.max(ballRadius + 1, Math.min(fieldWidth - ballRadius - 1, ballB.position.x + offsetX)),
+            y: Math.max(ballRadius + 1, Math.min(fieldHeight - ballRadius - 1, ballB.position.y + offsetY)),
+          };
+
+          ballA.setPosition(newPosA);
+          ballB.setPosition(newPosB);
+        }
+      }
+    }
+  }
+
+  /**
+   * Expire old ball claims (claims expire after 3 seconds)
+   */
+  private expireBallClaims(): void {
+    const currentTick = this.match.clock.tick;
+    const expirationTicks = 180; // 3 seconds at 60 ticks/sec
+
+    for (const ball of this.match.getBalls()) {
+      if (ball.isClaimed() && ball.isClaimExpired(currentTick, expirationTicks)) {
+        ball.releaseClaim();
       }
     }
   }
@@ -722,6 +1511,17 @@ export class SimulationEngine {
   }
 
   /**
+   * Calculate the maximum number of balls a robot can pick up at once
+   * based on collection face size divided by ball size, minus 2
+   */
+  private getMaxBallsPerPickup(robot: Robot): number {
+    const collectionFaceSize = robot.config.collectionFaceSize ?? robot.config.width;
+    const ballDiameter = this.config.ballPhysics.radius * 2;
+    const maxBalls = Math.floor(collectionFaceSize / ballDiameter) - 2;
+    return Math.max(1, maxBalls); // At least 1 ball per pickup
+  }
+
+  /**
    * Process automatic ball pickups when robots are near available balls
    */
   private processPickups(): void {
@@ -730,18 +1530,42 @@ export class SimulationEngine {
 
       // For idle robots, start a primary pickup action
       if (robot.isIdle()) {
+        // Find all balls within pickup range
+        const ballsInRange: string[] = [];
         for (const ball of this.match.getAvailableBalls()) {
           if (isInPickupRange(robot.position, ball.position, 12)) {
+            ballsInRange.push(ball.id);
+          }
+        }
+
+        if (ballsInRange.length > 0) {
+          // Calculate how many balls can be picked up at once
+          const maxPerPickup = this.getMaxBallsPerPickup(robot);
+          const spaceAvailable = robot.config.ballCapacity - robot.heldBalls.length;
+          const ballsToPickup = ballsInRange.slice(0, Math.min(maxPerPickup, spaceAvailable));
+
+          if (ballsToPickup.length > 0) {
+            // Claim all balls we're picking up
+            for (const ballId of ballsToPickup) {
+              const ball = this.match.getBall(ballId);
+              if (ball) {
+                ball.claim(robot.id, this.match.clock.tick);
+              }
+            }
+
             robot.startAction(
-              { type: RobotActionType.PICKING_UP, targetBallId: ball.id },
+              {
+                type: RobotActionType.PICKING_UP,
+                targetBallId: ballsToPickup[0], // Primary target for compatibility
+                targetBallIds: ballsToPickup,   // All balls being picked up
+              },
               this.match.clock.tick
             );
-            break;
           }
         }
       }
-      // For shooting robots with balls in hopper, start a secondary pickup
-      else if (robot.isShooting() && robot.hasBalls() && !robot.hasSecondaryAction()) {
+      // For moving or shooting robots, start a secondary pickup (pickup while doing other action)
+      else if ((robot.isMoving() || robot.isShooting()) && !robot.hasSecondaryAction()) {
         for (const ball of this.match.getAvailableBalls()) {
           if (isInPickupRange(robot.position, ball.position, 12)) {
             robot.startSecondaryPickup(ball.id, this.match.clock.tick);
@@ -804,6 +1628,9 @@ export class SimulationEngine {
     this.match.addEvent(GameEventType.MATCH_END);
     const result = this.match.getResult();
     this.recorder.stop(result);
+
+    // Write decision log stats
+    this.decisionLogger.writeStatsFile();
 
     this.events.emit(SimulationEvents.MATCH_END, { result });
     return result;

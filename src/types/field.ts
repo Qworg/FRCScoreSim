@@ -41,6 +41,14 @@ export interface ZoneModifiers {
   protected?: boolean;
   /** Alliance that owns this zone ('red' | 'blue' | null) */
   alliance?: 'red' | 'blue' | null;
+  /** Whether robots cannot score from this zone */
+  noScoring?: boolean;
+  /** Whether balls cannot pass through this zone */
+  blocksBalls?: boolean;
+  /** Ramp height at center in inches (for ball physics - balls climb ramps) */
+  rampHeight?: number;
+  /** Direction ramp faces: 'left' = slopes down to left, 'right' = slopes down to right */
+  rampDirection?: 'left' | 'right';
 }
 
 /**

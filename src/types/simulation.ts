@@ -72,7 +72,7 @@ export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
     airResistance: 0.99,
     gravity: 386, // ~32 ft/s^2 in inches
     minVelocity: 1,
-    respawnDelay: 180, // 3 seconds at 60 ticks/s
+    respawnDelay: 60, // 1 second at 60 ticks/s
   },
   gameRules: {
     timing: {
@@ -94,3 +94,71 @@ export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   recordEvents: true,
   wsPort: 0,
 };
+
+/**
+ * Strategies for escaping when a robot is stuck
+ */
+export enum EscapeStrategy {
+  /** Try to find a new path to the target */
+  REPATH = 'REPATH',
+  /** Move perpendicular to the left of the current direction */
+  PERPENDICULAR_LEFT = 'PERPENDICULAR_LEFT',
+  /** Move perpendicular to the right of the current direction */
+  PERPENDICULAR_RIGHT = 'PERPENDICULAR_RIGHT',
+  /** Move backward from current position */
+  BACKWARD = 'BACKWARD',
+  /** Move in a random direction */
+  RANDOM_DIRECTION = 'RANDOM_DIRECTION',
+  /** Give up on current target and let strategy make a new decision */
+  ABANDON_TARGET = 'ABANDON_TARGET',
+}
+
+/**
+ * Information about a nearby obstacle
+ */
+export interface ObstacleInfo {
+  /** Type of obstacle */
+  type: 'robot' | 'wall' | 'zone';
+  /** Position of the obstacle */
+  position: { x: number; y: number };
+  /** Distance to the obstacle */
+  distance: number;
+  /** Angle to the obstacle from robot's perspective (degrees) */
+  angle: number;
+  /** ID if it's a robot */
+  robotId?: string;
+}
+
+/**
+ * State tracking for a stuck robot
+ */
+export interface StuckState {
+  /** ID of the robot */
+  robotId: string;
+  /** Tick when the robot was first detected as stuck */
+  stuckSince: number;
+  /** Number of ticks the robot has been stuck */
+  stuckTicks: number;
+  /** Number of escape attempts made */
+  escapeAttempts: number;
+  /** Last escape strategy that was tried */
+  lastEscapeStrategy: EscapeStrategy | null;
+  /** List of escape strategies that failed */
+  failedStrategies: EscapeStrategy[];
+  /** Nearby obstacles detected */
+  nearbyObstacles: ObstacleInfo[];
+  /** Rolling position history (last N positions) */
+  positionHistory: Array<{ x: number; y: number; tick: number }>;
+}
+
+/**
+ * Action to take when escaping from stuck state
+ */
+export interface EscapeAction {
+  /** The escape strategy being used */
+  strategy: EscapeStrategy;
+  /** Target position to move to (if applicable) */
+  targetPosition?: { x: number; y: number };
+  /** Whether to abandon the current action entirely */
+  abandonCurrentAction: boolean;
+}

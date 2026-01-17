@@ -234,24 +234,22 @@ export function areRobotsColliding(
 }
 
 /**
- * Separate colliding robots
+ * Separate colliding robots, respecting field bounds and obstacles
  */
 export function separateRobots(
   robot1: Robot,
-  robot2: Robot
+  robot2: Robot,
+  field?: Field
 ): { pos1: Position; pos2: Position } {
   const pos1 = Vector2D.fromPosition(robot1.position);
   const pos2 = Vector2D.fromPosition(robot2.position);
 
   const minDistance = (robot1.config.width + robot2.config.width) / 2 + 2;
-  const direction = pos2.subtract(pos1).normalize();
+  let direction = pos2.subtract(pos1).normalize();
 
   if (direction.magnitude() === 0) {
     // Robots at exact same position, push apart arbitrarily
-    return {
-      pos1: pos1.subtract(new Vector2D(minDistance / 2, 0)).toPosition(),
-      pos2: pos2.add(new Vector2D(minDistance / 2, 0)).toPosition(),
-    };
+    direction = new Vector2D(1, 0);
   }
 
   const currentDistance = pos1.distanceTo(pos2);
@@ -263,8 +261,65 @@ export function separateRobots(
 
   const halfOverlap = overlap / 2;
 
-  return {
-    pos1: pos1.subtract(direction.multiply(halfOverlap)).toPosition(),
-    pos2: pos2.add(direction.multiply(halfOverlap)).toPosition(),
-  };
+  let newPos1 = pos1.subtract(direction.multiply(halfOverlap)).toPosition();
+  let newPos2 = pos2.add(direction.multiply(halfOverlap)).toPosition();
+
+  // Validate and clamp positions if field is provided
+  if (field) {
+    newPos1 = clampToValidPosition(newPos1, robot1, field);
+    newPos2 = clampToValidPosition(newPos2, robot2, field);
+  }
+
+  return { pos1: newPos1, pos2: newPos2 };
+}
+
+/**
+ * Clamp position to a valid traversable area
+ */
+function clampToValidPosition(
+  pos: Position,
+  robot: Robot,
+  field: Field
+): Position {
+  const margin = robot.config.width / 2;
+
+  // First clamp to field bounds
+  let x = clamp(pos.x, margin, field.config.width - margin);
+  let y = clamp(pos.y, margin, field.config.height - margin);
+
+  // Check if position is traversable
+  const gridPos = field.positionToGrid({ x, y });
+  if (field.canRobotTraverse(gridPos, robot.config.height)) {
+    return { x, y };
+  }
+
+  // Position is in an obstacle - try to find nearest valid position
+  // Check in a small radius around the original position
+  const searchRadius = 20;
+  let bestPos = robot.position; // Fall back to original position
+  let bestDist = Infinity;
+
+  for (let angle = 0; angle < 360; angle += 45) {
+    for (let dist = 5; dist <= searchRadius; dist += 5) {
+      const testX = pos.x + Math.cos((angle * Math.PI) / 180) * dist;
+      const testY = pos.y + Math.sin((angle * Math.PI) / 180) * dist;
+
+      // Clamp to field bounds
+      const clampedX = clamp(testX, margin, field.config.width - margin);
+      const clampedY = clamp(testY, margin, field.config.height - margin);
+
+      const testGrid = field.positionToGrid({ x: clampedX, y: clampedY });
+      if (field.canRobotTraverse(testGrid, robot.config.height)) {
+        const distFromTarget = Math.sqrt(
+          (clampedX - pos.x) ** 2 + (clampedY - pos.y) ** 2
+        );
+        if (distFromTarget < bestDist) {
+          bestDist = distFromTarget;
+          bestPos = { x: clampedX, y: clampedY };
+        }
+      }
+    }
+  }
+
+  return bestPos;
 }

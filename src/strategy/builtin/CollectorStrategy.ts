@@ -12,14 +12,27 @@ export class CollectorStrategy extends BaseStrategy {
   readonly description = 'Focus on collecting balls and bringing them to teammates';
 
   decide(context: StrategyContext): StrategyDecision {
-    const { robot, nearestBall, nearestBallDistance, phase, canScore } = context;
+    const { robot, phase, canScore } = context;
+
+    // Use unclaimed balls for alliance coordination
+    const nearestBall = context.nearestUnclaimedBall ?? context.nearestBall;
+    const nearestBallDistance = context.nearestUnclaimedBallDistance ?? context.nearestBallDistance;
+
+    // If robot has auto-climbed during AUTO, stay at climb zone until phase ends
+    if (phase === MatchPhase.AUTO && robot.hasAutoClimbed) {
+      return this.idle('Auto - staying at climb zone until phase ends');
+    }
+
+    // Only start climbing near the end of auto (when < 8 seconds remain)
+    const shouldAutoClimb = context.phaseTimeRemaining < 8;
 
     // In auto, try to auto-climb if robot can and alliance has slots
     if (
       phase === MatchPhase.AUTO &&
       robot.config.autoClimb &&
       !robot.hasAutoClimbed &&
-      context.allianceCanAutoClimb
+      context.allianceCanAutoClimb &&
+      shouldAutoClimb
     ) {
       // If already climbing, continue
       if (robot.currentAction.type === RobotActionType.CLIMBING) {
@@ -42,12 +55,16 @@ export class CollectorStrategy extends BaseStrategy {
       return this.autoClimb(StrategyPriority.HIGH, 'Auto - attempting to climb (15 pts)');
     }
 
+    // Only start climbing near the end of endgame (when < 12 seconds remain)
+    const shouldEndgameClimb = context.phaseTimeRemaining < 12;
+
     // In endgame, try to climb if we can
     if (
       phase === MatchPhase.ENDGAME &&
       robot.config.canClimb &&
       !robot.hasClimbed &&
-      context.allianceCanEndgameClimb
+      context.allianceCanEndgameClimb &&
+      shouldEndgameClimb
     ) {
       // If already climbing, continue
       if (robot.currentAction.type === RobotActionType.CLIMBING) {
@@ -75,31 +92,90 @@ export class CollectorStrategy extends BaseStrategy {
       );
     }
 
-    // If we have balls and can score and in range, shoot them
+    // If we have balls and can score and in range, check shooting position quality
     if (robot.heldBalls.length > 0 && canScore && context.inShootingRange && context.nearestScoringTarget) {
-      return this.shoot(
-        context.nearestScoringTarget.id,
-        StrategyPriority.HIGH,
-        'Can score - shooting'
-      );
+      // Only shoot if we're in a good position
+      if (
+        context.hasClearShotPath &&
+        context.isGoodShootingPosition &&
+        !context.isInNoScoreZone
+      ) {
+        return this.shoot(
+          context.nearestScoringTarget.id,
+          StrategyPriority.HIGH,
+          'Can score from good position - shooting'
+        );
+      }
+      // Otherwise, need to reposition (fall through to movement logic)
     }
 
-    // If at capacity but not in range, move to scoring zone
+    // If at capacity but can't score, shoot balls towards our zone from center
     if (robot.heldBalls.length >= robot.config.ballCapacity) {
-      // If already moving, let it continue
+      const nearestTarget = context.nearestScoringTarget;
+
+      // If can't score but hopper is full, shoot towards our zone
+      if (!canScore && nearestTarget) {
+        // If in range and have clear shot, shoot towards our goal
+        if (context.inShootingRange && context.hasClearShotPath) {
+          return this.shoot(
+            nearestTarget.id,
+            StrategyPriority.MEDIUM,
+            'Hopper full - shooting to position balls in our zone'
+          );
+        }
+
+        // Move towards center of field to shoot
+        const fieldCenterX = context.field.width / 2;
+        const fieldCenterY = context.field.height / 2;
+
+        // Position at edge of no-score zone on our side
+        const isRedAlliance = robot.alliance === 'red';
+        const targetX = isRedAlliance
+          ? fieldCenterX - 145  // Just outside no-score zone on red side
+          : fieldCenterX + 145; // Just outside no-score zone on blue side
+
+        if (robot.currentAction.type === RobotActionType.MOVING) {
+          return this.idle('Moving to center to shoot');
+        }
+
+        return this.moveTo(
+          targetX,
+          fieldCenterY,
+          StrategyPriority.MEDIUM,
+          'Moving to center to shoot balls into our zone'
+        );
+      }
+
+      // Can score - move to good shooting position
       if (robot.currentAction.type === RobotActionType.MOVING) {
         return this.idle('Continuing to scoring area');
       }
-      const nearestTarget = context.nearestScoringTarget;
+
       if (nearestTarget) {
+        // Calculate position on our side of field, avoiding ramps/trenches
+        const shootingRange = robot.config.shootingRange * 0.8;
+        const dx = nearestTarget.position.x - robot.position.x;
+        const dy = nearestTarget.position.y - robot.position.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const ratio = shootingRange / dist;
+
+        let targetX = nearestTarget.position.x - dx * ratio;
+        let targetY = nearestTarget.position.y - dy * ratio;
+
+        // Adjust Y to stay in safe zone (avoid ramps/trenches)
+        const fieldHeight = context.field.height;
+        const safeYMin = fieldHeight * 0.25;
+        const safeYMax = fieldHeight * 0.75;
+        targetY = Math.max(safeYMin, Math.min(safeYMax, targetY));
+
         return this.moveTo(
-          nearestTarget.position.x,
-          nearestTarget.position.y,
+          targetX,
+          targetY,
           StrategyPriority.MEDIUM,
-          canScore ? 'At capacity, moving to scoring area' : 'At capacity, positioning for next scoring window'
+          'At capacity, moving to good shooting position'
         );
       }
-      return this.idle(canScore ? 'At capacity, waiting' : 'At capacity, waiting for scoring window');
+      return this.idle('At capacity, waiting');
     }
 
     // If there's a ball nearby, go get it
@@ -129,8 +205,15 @@ export class CollectorStrategy extends BaseStrategy {
 
     // No balls available - if we have any, shoot them (if allowed) or move to scoring zone
     if (robot.heldBalls.length > 0) {
-      // If we can score and in shooting range, shoot
-      if (canScore && context.inShootingRange && context.nearestScoringTarget) {
+      // If we can score and in shooting range and good position, shoot
+      if (
+        canScore &&
+        context.inShootingRange &&
+        context.nearestScoringTarget &&
+        context.hasClearShotPath &&
+        context.isGoodShootingPosition &&
+        !context.isInNoScoreZone
+      ) {
         return this.shoot(
           context.nearestScoringTarget.id,
           StrategyPriority.MEDIUM,
@@ -141,14 +224,30 @@ export class CollectorStrategy extends BaseStrategy {
       if (robot.currentAction.type === RobotActionType.MOVING) {
         return this.idle('Continuing to scoring area');
       }
-      // Move to scoring zone (to be ready when we can score or to find balls)
+      // Move to good shooting position (to be ready when we can score or to find balls)
       const nearestTarget = context.nearestScoringTarget;
       if (nearestTarget) {
+        // Calculate position on our side of field, avoiding ramps/trenches
+        const shootingRange = robot.config.shootingRange * 0.8;
+        const dx = nearestTarget.position.x - robot.position.x;
+        const dy = nearestTarget.position.y - robot.position.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const ratio = Math.min(1, shootingRange / dist);
+
+        let targetX = nearestTarget.position.x - dx * ratio;
+        let targetY = nearestTarget.position.y - dy * ratio;
+
+        // Adjust Y to stay in safe zone
+        const fieldHeight = context.field.height;
+        const safeYMin = fieldHeight * 0.25;
+        const safeYMax = fieldHeight * 0.75;
+        targetY = Math.max(safeYMin, Math.min(safeYMax, targetY));
+
         return this.moveTo(
-          nearestTarget.position.x,
-          nearestTarget.position.y,
+          targetX,
+          targetY,
           StrategyPriority.MEDIUM,
-          canScore ? 'No balls left, moving to scoring area' : 'Positioning for next scoring window'
+          canScore ? 'No balls left, moving to good shooting position' : 'Positioning for next scoring window'
         );
       }
     }

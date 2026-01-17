@@ -18,8 +18,6 @@ export class EndgameClimberStrategy extends BaseStrategy {
   decide(context: StrategyContext): StrategyDecision {
     const {
       robot,
-      nearestBall,
-      nearestBallDistance,
       nearestScoringTarget,
       nearestScoringTargetDistance,
       inShootingRange,
@@ -28,7 +26,14 @@ export class EndgameClimberStrategy extends BaseStrategy {
       canScore,
       allianceCanEndgameClimb,
     } = context;
+
+    // Use unclaimed balls for alliance coordination
+    const nearestBall = context.nearestUnclaimedBall ?? context.nearestBall;
+    const nearestBallDistance = context.nearestUnclaimedBallDistance ?? context.nearestBallDistance;
     // Also use context.isNearClimbingZone and context.climbingZonePosition directly
+
+    // Only start climbing near the end of endgame (when < 12 seconds remain)
+    const shouldEndgameClimb = phaseTimeRemaining < 12;
 
     // In endgame, prioritize climbing at max level
     if (phase === MatchPhase.ENDGAME && robot.config.canClimb && !robot.hasClimbed && allianceCanEndgameClimb) {
@@ -37,21 +42,8 @@ export class EndgameClimberStrategy extends BaseStrategy {
         return this.idle('Continuing endgame climb');
       }
 
-      // Must be near climbing zone to climb
-      if (!context.isNearClimbingZone && context.climbingZonePosition) {
-        if (robot.currentAction.type === RobotActionType.MOVING) {
-          return this.idle('Moving to climb zone');
-        }
-        return this.moveTo(
-          context.climbingZonePosition.x,
-          context.climbingZonePosition.y,
-          StrategyPriority.CRITICAL,
-          'Endgame - moving to climb zone'
-        );
-      }
-
       // With plenty of time, shoot remaining balls first
-      if (phaseTimeRemaining > robot.config.climbUpTime + 5) {
+      if (!shouldEndgameClimb || robot.heldBalls.length > 0) {
         if (canScore && robot.heldBalls.length > 0 && inShootingRange && nearestScoringTarget) {
           return this.shoot(
             nearestScoringTarget.id,
@@ -61,12 +53,28 @@ export class EndgameClimberStrategy extends BaseStrategy {
         }
       }
 
-      // Start climbing at max level - this is the priority
-      return this.endgameClimb(
-        robot.config.climbLevel,
-        StrategyPriority.CRITICAL,
-        `Endgame - climbing to level ${robot.config.climbLevel}`
-      );
+      // Time to climb
+      if (shouldEndgameClimb) {
+        // Must be near climbing zone to climb
+        if (!context.isNearClimbingZone && context.climbingZonePosition) {
+          if (robot.currentAction.type === RobotActionType.MOVING) {
+            return this.idle('Moving to climb zone');
+          }
+          return this.moveTo(
+            context.climbingZonePosition.x,
+            context.climbingZonePosition.y,
+            StrategyPriority.CRITICAL,
+            'Endgame - moving to climb zone'
+          );
+        }
+
+        // Start climbing at max level - this is the priority
+        return this.endgameClimb(
+          robot.config.climbLevel,
+          StrategyPriority.CRITICAL,
+          `Endgame - climbing to level ${robot.config.climbLevel}`
+        );
+      }
     }
 
     // Standard scoring during other phases

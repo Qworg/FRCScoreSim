@@ -31,7 +31,7 @@ export class Match {
   private events: GameEvent[] = [];
   private config: SimulationConfig;
   private paused: boolean = false;
-  private ballRespawnTicks: Map<string, number> = new Map();
+  private ballRespawnTicks: Map<string, { tick: number; scoringTargetId: string | null }> = new Map();
 
   constructor(fieldConfig: FieldConfig, config: SimulationConfig = DEFAULT_SIMULATION_CONFIG) {
     this.field = new Field(fieldConfig);
@@ -144,8 +144,8 @@ export class Match {
       points,
     });
 
-    // Schedule ball respawn
-    this.scheduleBallRespawn(ballId);
+    // Schedule ball respawn from the scoring zone
+    this.scheduleBallRespawn(ballId, targetId);
 
     return points;
   }
@@ -215,10 +215,10 @@ export class Match {
   /**
    * Schedule a ball to respawn after delay
    */
-  private scheduleBallRespawn(ballId: string): void {
+  private scheduleBallRespawn(ballId: string, scoringTargetId: string | null = null): void {
     const respawnTick =
       this.clock.tick + this.config.ballPhysics.respawnDelay;
-    this.ballRespawnTicks.set(ballId, respawnTick);
+    this.ballRespawnTicks.set(ballId, { tick: respawnTick, scoringTargetId });
   }
 
   /**
@@ -226,21 +226,113 @@ export class Match {
    */
   processBallRespawns(): void {
     const currentTick = this.clock.tick;
+    const fieldCenterX = this.field.config.width / 2; // 324
 
-    for (const [ballId, respawnTick] of this.ballRespawnTicks) {
-      if (currentTick >= respawnTick) {
+    for (const [ballId, respawnData] of this.ballRespawnTicks) {
+      if (currentTick >= respawnData.tick) {
         const ball = this.getBall(ballId);
         if (ball && (ball.state === BallState.SCORED || ball.state === BallState.OUT_OF_BOUNDS)) {
-          const spawnPoint = this.field.config.ballSpawnPoints.find(
-            (sp) => sp.id === ball.data.spawnPointId
-          );
-          if (spawnPoint) {
-            ball.respawn(spawnPoint.position, currentTick);
+          // If scored, respawn from scoring zone face
+          if (ball.state === BallState.SCORED && respawnData.scoringTargetId) {
+            this.respawnFromScoringZone(ball, respawnData.scoringTargetId, currentTick, fieldCenterX);
+          } else {
+            // Out of bounds - respawn at original spawn point
+            const spawnPoint = this.field.config.ballSpawnPoints.find(
+              (sp) => sp.id === ball.data.spawnPointId
+            );
+            if (spawnPoint) {
+              ball.respawn(spawnPoint.position, currentTick);
+            }
           }
         }
         this.ballRespawnTicks.delete(ballId);
       }
     }
+  }
+
+  /**
+   * Respawn a ball from a scoring zone with velocity towards center
+   */
+  private respawnFromScoringZone(
+    ball: Ball,
+    scoringTargetId: string,
+    tick: number,
+    fieldCenterX: number
+  ): void {
+    const target = this.field.config.scoringTargets.find(t => t.id === scoringTargetId);
+    if (!target) {
+      // Fallback to simple respawn
+      ball.respawn({ x: fieldCenterX, y: this.field.config.height / 2 }, tick);
+      return;
+    }
+
+    // Find the corresponding scoring zone (SCORING_ZONE type)
+    // The scoring zones are the 47"×47" squares that block balls
+    const scoringZones = this.field.config.zones.filter(
+      z => z.type === 'SCORING_ZONE' && z.modifiers?.blocksBalls
+    );
+
+    // Find the zone closest to this target
+    let closestZone = scoringZones[0];
+    let closestDist = Infinity;
+    for (const zone of scoringZones) {
+      const zoneCenterX = (zone.bounds.minX + zone.bounds.maxX) / 2;
+      const zoneCenterY = (zone.bounds.minY + zone.bounds.maxY) / 2;
+      const dist = Math.abs(zoneCenterX - target.position.x) + Math.abs(zoneCenterY - target.position.y);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestZone = zone;
+      }
+    }
+
+    if (!closestZone) {
+      ball.respawn({ x: fieldCenterX, y: this.field.config.height / 2 }, tick);
+      return;
+    }
+
+    // Calculate exit position on the center-side face of the scoring zone
+    const zoneCenterX = (closestZone.bounds.minX + closestZone.bounds.maxX) / 2;
+    const zoneCenterY = (closestZone.bounds.minY + closestZone.bounds.maxY) / 2;
+    const zoneHalfHeight = (closestZone.bounds.maxY - closestZone.bounds.minY) / 2;
+
+    // Determine which side faces the center
+    const isLeftSide = zoneCenterX < fieldCenterX;
+    // Add offset to spawn ball clearly outside the scoring zone (5" buffer)
+    const exitOffset = 5;
+    const exitX = isLeftSide
+      ? closestZone.bounds.maxX + exitOffset  // Exit from right face (towards center)
+      : closestZone.bounds.minX - exitOffset; // Exit from left face (towards center)
+
+    // Random Y position along the face
+    const exitY = zoneCenterY + (Math.random() - 0.5) * zoneHalfHeight * 1.5;
+
+    // Exit height is 30.13 inches
+    const exitHeight = 30.13;
+
+    // Random velocity within 30-degree cone towards center
+    // Base direction: towards center (positive X for left side, negative X for right side)
+    const baseAngle = isLeftSide ? 0 : Math.PI; // 0 = right, PI = left
+
+    // Random angle within ±30 degrees (±PI/6 radians)
+    const coneHalfAngle = Math.PI / 6; // 30 degrees
+    const randomAngle = baseAngle + (Math.random() - 0.5) * 2 * coneHalfAngle;
+
+    // Slow speed - ball just rolls out of hub (20-35 in/s)
+    const speed = 20 + Math.random() * 15;
+
+    // Calculate velocity components
+    const vx = Math.cos(randomAngle) * speed;
+    const vy = Math.sin(randomAngle) * speed;
+
+    // Small downward velocity (ball drops from 30.13" height)
+    const vz = -10 + Math.random() * 5; // Gentle drop, varies -10 to -5 in/s
+
+    ball.respawnWithVelocity(
+      { x: exitX, y: exitY },
+      exitHeight,
+      { vx, vy, vz },
+      tick
+    );
   }
 
   /**
