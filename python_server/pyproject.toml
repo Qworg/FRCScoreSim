@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "frc-sim-server"
+version = "0.1.0"
+description = "High-performance FRC match simulation server"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "websockets>=12.0",
+    "aiohttp>=3.9",
+    "msgspec>=0.18",
+    "uvloop>=0.19; platform_system != 'Windows'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+frc-sim-server = "frc_sim_server.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["frc_sim_server"]
