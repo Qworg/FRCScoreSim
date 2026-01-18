@@ -105,7 +105,8 @@ class WebSocketServer:
         """Send message to a client."""
         try:
             data = self._encoder.encode(message)
-            await websocket.send(data)
+            # Decode bytes to string so it's sent as text, not binary
+            await websocket.send(data.decode('utf-8'))
         except websockets.exceptions.ConnectionClosed:
             self.clients.discard(websocket)
 
@@ -123,9 +124,10 @@ class WebSocketServer:
     async def _send_bytes(
         self, websocket: WebSocketServerProtocol, data: bytes
     ) -> None:
-        """Send raw bytes to a client."""
+        """Send raw bytes to a client as text."""
         try:
-            await websocket.send(data)
+            # Decode bytes to string so it's sent as text, not binary
+            await websocket.send(data.decode('utf-8'))
         except websockets.exceptions.ConnectionClosed:
             self.clients.discard(websocket)
 
