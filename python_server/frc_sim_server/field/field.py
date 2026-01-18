@@ -64,27 +64,32 @@ class Field:
         return 1.0
 
     def get_ramp_height_at(self, pos: Position) -> float:
-        """Get the ramp height at a position."""
+        """Get the ramp height at a position.
+
+        Uses parabolic profile to match TypeScript implementation.
+        Ramp is highest at center, tapers to 0 at edges.
+        """
         zone = self.get_zone_at(pos)
         if zone and zone.modifiers and zone.modifiers.rampHeight is not None:
-            # Calculate height based on position within ramp
             ramp_height = zone.modifiers.rampHeight
-            direction = zone.modifiers.rampDirection or "left"
+            if ramp_height == 0:
+                return 0.0
 
-            # Calculate fraction across the ramp
+            # Calculate position within ramp (0 = edge, 1 = center)
             bounds = zone.bounds
-            width = bounds.maxX - bounds.minX
-            if width == 0:
+            zone_center_x = (bounds.minX + bounds.maxX) / 2
+            zone_width = bounds.maxX - bounds.minX
+
+            if zone_width == 0:
                 return ramp_height
 
-            if direction == "left":
-                # Slopes down to left (higher on right side)
-                frac = (pos.x - bounds.minX) / width
-            else:
-                # Slopes down to right (higher on left side)
-                frac = (bounds.maxX - pos.x) / width
+            dist_from_center = abs(pos.x - zone_center_x)
+            normalized_dist = dist_from_center / (zone_width / 2)
 
-            return ramp_height * frac
+            # Ramp is highest at center, tapers to 0 at edges
+            # Use a smooth curve (parabolic) for the ramp profile
+            height_factor = 1 - normalized_dist * normalized_dist
+            return ramp_height * max(0.0, height_factor)
 
         return 0.0
 
