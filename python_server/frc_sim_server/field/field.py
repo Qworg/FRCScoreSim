@@ -1,6 +1,7 @@
 """Field representation with zone management."""
 
 from __future__ import annotations
+import math
 from typing import Optional
 
 from ..types.enums import ZoneType
@@ -104,13 +105,25 @@ class Field:
 
         zone = self.get_zone_at(pos)
         if zone:
+            # Check for impassable zones
             if zone.type == ZoneType.OBSTACLE.value:
                 return False
             if zone.type == ZoneType.OUT_OF_BOUNDS.value:
                 return False
+
+            # Scoring zones with blocksBalls are also impassable to robots
+            if (
+                zone.type == ZoneType.SCORING_ZONE.value
+                and zone.modifiers
+                and zone.modifiers.blocksBalls
+            ):
+                return False
+
             if zone.modifiers:
+                # Check for protected zones
                 if zone.modifiers.protected:
                     return False
+                # Check height restrictions (e.g., trench)
                 if (
                     zone.modifiers.maxHeight is not None
                     and robot_height > zone.modifiers.maxHeight
@@ -119,41 +132,82 @@ class Field:
         return True
 
     def get_cost_at(self, pos: Position) -> float:
-        """Get the pathfinding cost at a position."""
+        """Get the pathfinding cost at a position.
+
+        Matches TypeScript calculateBaseCost implementation.
+        """
         zone = self.get_zone_at(pos)
         if zone:
-            if zone.type == ZoneType.RAMP.value:
-                return 2.0  # Ramps are slower
-            if zone.modifiers and zone.modifiers.speedMultiplier is not None:
-                return 1.0 / zone.modifiers.speedMultiplier
+            zone_type = zone.type
+            modifiers = zone.modifiers
+
+            if zone_type == ZoneType.NORMAL.value:
+                return 1.0
+            if zone_type == ZoneType.RAMP.value:
+                # Use inverse of speedMultiplier (default 0.5 -> cost 2.0)
+                speed_mult = modifiers.speedMultiplier if modifiers else 0.5
+                return 1.0 / (speed_mult if speed_mult else 0.5)
+            if zone_type == ZoneType.TRENCH.value:
+                return 1.1
+            if zone_type == ZoneType.CLIMBING.value:
+                return 1.5
+            if zone_type == ZoneType.SCORING_ZONE.value:
+                return 1.0
+            if zone_type == ZoneType.OBSTACLE.value:
+                return float("inf")
+            if zone_type == ZoneType.OUT_OF_BOUNDS.value:
+                return float("inf")
+
         return 1.0
 
-    def is_near_climbing_zone(self, pos: Position, alliance: str) -> bool:
-        """Check if position is near the alliance's climbing zone."""
-        proximity = 30.0  # 30 inches proximity
+    def is_near_climbing_zone(
+        self, pos: Position, alliance: str, proximity_threshold: float = 36.0
+    ) -> bool:
+        """Check if position is within or near a climbing zone for the alliance.
 
+        Uses position-based alliance detection: red climbing zone is on the left
+        (low X), blue is on the right (high X).
+        """
         for zone in self.config.zones:
             if zone.type != ZoneType.CLIMBING.value:
                 continue
 
-            if zone.modifiers and zone.modifiers.alliance != alliance:
+            # Check if this is the alliance's climbing zone based on position
+            # Red climbing zone is on the left (low X), Blue is on the right (high X)
+            is_red_zone = zone.bounds.minX < self.config.width / 2
+            is_alliance_zone = (alliance == "red" and is_red_zone) or (
+                alliance == "blue" and not is_red_zone
+            )
+
+            if not is_alliance_zone:
                 continue
 
-            # Check proximity to climbing zone
+            # Check if position is within the zone
             bounds = zone.bounds
-            center_x = (bounds.minX + bounds.maxX) / 2
-            center_y = (bounds.minY + bounds.maxY) / 2
+            in_zone_x = bounds.minX <= pos.x <= bounds.maxX
+            in_zone_y = bounds.minY <= pos.y <= bounds.maxY
 
-            dx = abs(pos.x - center_x)
-            dy = abs(pos.y - center_y)
+            if in_zone_x and in_zone_y:
+                return True
 
-            half_width = (bounds.maxX - bounds.minX) / 2 + proximity
-            half_height = (bounds.maxY - bounds.minY) / 2 + proximity
-
-            if dx <= half_width and dy <= half_height:
+            # Check proximity to zone bounds using clamped distance
+            dist_to_zone = self._distance_to_zone(pos, bounds)
+            if dist_to_zone <= proximity_threshold:
                 return True
 
         return False
+
+    def _distance_to_zone(
+        self,
+        pos: Position,
+        bounds: "ZoneDefinition.bounds",
+    ) -> float:
+        """Calculate minimum distance from a position to a zone's bounds."""
+        clamped_x = max(bounds.minX, min(bounds.maxX, pos.x))
+        clamped_y = max(bounds.minY, min(bounds.maxY, pos.y))
+        dx = pos.x - clamped_x
+        dy = pos.y - clamped_y
+        return math.sqrt(dx * dx + dy * dy)
 
     def is_in_no_score_zone(self, pos: Position) -> bool:
         """Check if position is in a no-scoring zone."""
@@ -205,17 +259,73 @@ class Field:
         return pos.x >= mid_x
 
     def has_clear_shot_path(
-        self, from_pos: Position, to_pos: Position
+        self, from_pos: Position, to_pos: Position, steps: int = 20
     ) -> bool:
-        """Check if there's a clear path for shooting."""
-        # Simple check - no obstacles in the way
-        # More sophisticated implementation could check for blocking zones
+        """Check if there's a clear shot path between two positions.
+
+        Shots from a robot's own third of the field are allowed to pass into
+        their scoring zone.
+        """
+        field_width = self.config.width
+        left_third_boundary = field_width / 3  # 216" for 648" field
+        right_third_boundary = (field_width * 2) / 3  # 432" for 648" field
+
+        # Determine which third the shot originates from
+        is_from_left_third = from_pos.x < left_third_boundary
+        is_from_right_third = from_pos.x > right_third_boundary
+
+        for i in range(1, steps):
+            t = i / steps
+            check_x = from_pos.x + (to_pos.x - from_pos.x) * t
+            check_y = from_pos.y + (to_pos.y - from_pos.y) * t
+            check_pos = Position(x=check_x, y=check_y)
+
+            zone = self.get_zone_at(check_pos)
+            if not self.is_in_bounds(check_pos):
+                return False
+
+            # Check for obstacles that block shots
+            if zone and zone.type == ZoneType.OBSTACLE.value:
+                return False
+
+            # Cells with blocksBalls modifier block shots that pass through them,
+            # UNLESS the shot originates from the proper third of the field
+            if zone and zone.modifiers and zone.modifiers.blocksBalls:
+                # Check if this blocking zone is on the left or right side
+                zone_is_on_left_side = check_x < field_width / 2
+
+                # Allow shots from left third through left blocking zone (red side)
+                # Allow shots from right third through right blocking zone (blue side)
+                is_allowed = (
+                    (is_from_left_third and zone_is_on_left_side)
+                    or (is_from_right_third and not zone_is_on_left_side)
+                )
+
+                if not is_allowed:
+                    return False
+
         return True
 
     def is_good_shooting_position(self, pos: Position) -> bool:
-        """Check if position is a good shooting position."""
-        # Not in a no-score zone
-        return not self.is_in_no_score_zone(pos)
+        """Check if position is good for shooting.
+
+        Cannot shoot from ramps, trenches, or no-score zones.
+        """
+        zone = self.get_zone_at(pos)
+
+        # Can't shoot from ramps
+        if zone and zone.type == ZoneType.RAMP.value:
+            return False
+
+        # Can't shoot from trenches
+        if zone and zone.type == ZoneType.TRENCH.value:
+            return False
+
+        # Can't shoot from no-score zone
+        if self.is_in_no_score_zone(pos):
+            return False
+
+        return True
 
     def clamp_to_bounds(self, pos: Position, margin: float = 0.0) -> Position:
         """Clamp a position to be within field bounds."""
