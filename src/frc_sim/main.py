@@ -175,7 +175,7 @@ async def run_server(
     logger.info(f"  WebSocket server on port {ws_port}")
     logger.info("")
     logger.info("For verbose logging, set LOG_LEVEL=DEBUG:")
-    logger.info("  LOG_LEVEL=DEBUG python -m frc_sim_server")
+    logger.info("  LOG_LEVEL=DEBUG python -m frc_sim")
     logger.info("=" * 60)
     logger.info("")
 

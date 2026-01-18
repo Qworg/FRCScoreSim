@@ -1,4 +1,4 @@
-"""Entry point for python -m frc_sim_server."""
+"""Entry point for python -m frc_sim."""
 
 from .main import main
 
