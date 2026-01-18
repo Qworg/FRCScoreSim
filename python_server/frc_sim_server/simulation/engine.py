@@ -7,7 +7,7 @@ import time
 from typing import Optional, Callable, TYPE_CHECKING
 from dataclasses import dataclass
 
-from ..types.enums import MatchPhase, RobotActionType, BallState, ShiftParity
+from ..types.enums import MatchPhase, RobotActionType, BallState, ShiftParity, EscapeStrategy
 from ..types.schemas import (
     Position,
     FieldConfig,
@@ -37,6 +37,7 @@ from ..strategy.collector import CollectorStrategy
 from ..strategy.scorer import ScorerStrategy
 from .match import Match
 from .clock import GameClock
+from .stuck_handler import StuckHandler
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,9 @@ class SimulationEngine:
         # State
         self._running = False
         self._state_callback: Optional[Callable[[GameState], None]] = None
+
+        # Stuck handler for detecting and escaping stuck robots
+        self._stuck_handler = StuckHandler()
 
         # Log summary
         logger.info(f"SimulationEngine initialized:")
@@ -302,7 +306,12 @@ class SimulationEngine:
     def _update_strategies(self) -> None:
         """Update all robot strategies."""
         for robot in self.match.get_robots():
-            if robot.is_disabled or robot.has_climbed:
+            if robot.is_disabled:
+                continue
+
+            # Skip climbed robots entirely - clear any stuck tracking
+            if robot.has_climbed:
+                self._stuck_handler.clear_state(robot.id)
                 continue
 
             # Skip if robot has an action in progress
@@ -515,9 +524,123 @@ class SimulationEngine:
         robot.set_heading(result.heading)
         robot.set_velocity(result.velocity)
 
+        # Use StuckHandler for stuck detection and escape
+        other_robots = [
+            r for r in self.match.get_robots()
+            if r.id != robot.id
+        ]
+
+        escape_action = self._stuck_handler.update(
+            robot,
+            self.match.clock.tick,
+            result.blocked,
+            self.match.field,
+            other_robots,
+        )
+
+        if escape_action:
+            # Log stuck status
+            if self._stuck_handler.is_stuck(robot.id):
+                stuck_state = self._stuck_handler.get_state(robot.id)
+                logger.debug(
+                    f"Robot {robot.id} stuck for {stuck_state.stuck_ticks if stuck_state else 0} ticks, "
+                    f"escape strategy: {escape_action.strategy.value}"
+                )
+
+            # Handle escape action
+            self._handle_escape_action(robot, escape_action)
+
         if result.reached_target:
             next_target = robot.advance_path()
             if not next_target:
+                robot.complete_action()
+                self._stuck_handler.clear_state(robot.id)
+
+    def _handle_escape_action(
+        self,
+        robot: Robot,
+        escape_action,
+    ) -> None:
+        """Handle an escape action from the StuckHandler."""
+        from .stuck_handler import EscapeAction
+
+        if escape_action.abandon_current_action:
+            # Give up on current target entirely
+            robot.complete_action()
+            self._stuck_handler.clear_state(robot.id)
+            return
+
+        if escape_action.strategy == EscapeStrategy.REPATH:
+            self._repath_robot(robot)
+        elif escape_action.strategy in (
+            EscapeStrategy.PERPENDICULAR_LEFT,
+            EscapeStrategy.PERPENDICULAR_RIGHT,
+            EscapeStrategy.BACKWARD,
+            EscapeStrategy.RANDOM_DIRECTION,
+        ):
+            if escape_action.target_position:
+                self._escape_to_position(robot, escape_action.target_position)
+        elif escape_action.strategy == EscapeStrategy.ABANDON_TARGET:
+            robot.complete_action()
+            self._stuck_handler.clear_state(robot.id)
+
+    def _escape_to_position(self, robot: Robot, escape_position: Position) -> None:
+        """Escape to a specific position, then continue to original target."""
+        current_action = robot.current_action
+        if current_action.type != RobotActionType.MOVING.value or not current_action.targetPosition:
+            return
+
+        pathfinder = self._get_pathfinder(robot)
+        original_target = current_action.targetPosition
+
+        # Try to find path: current -> escape -> original target
+        to_escape = pathfinder.find_path(robot.position, escape_position)
+        if to_escape.found and len(to_escape.path) > 0:
+            from_escape = pathfinder.find_path(escape_position, original_target)
+            if from_escape.found and len(from_escape.path) > 0:
+                # Combine paths
+                combined_path = list(to_escape.path) + list(from_escape.path[1:])
+                robot.set_path(combined_path)
+                return
+
+        # If escape path failed, mark strategy as failed and try repath
+        self._stuck_handler.mark_strategy_failed(
+            robot.id,
+            EscapeStrategy.PERPENDICULAR_LEFT,  # Mark as generic perpendicular failure
+        )
+        self._repath_robot(robot)
+
+    def _repath_robot(self, robot: Robot) -> None:
+        """Attempt to re-path a stuck robot."""
+        current_action = robot.current_action
+        if current_action.type != RobotActionType.MOVING.value or not current_action.targetPosition:
+            robot.complete_action()
+            return
+
+        pathfinder = self._get_pathfinder(robot)
+
+        # Set other robots as obstacles with larger radius
+        other_robots = [
+            r for r in self.match.get_robots()
+            if r.id != robot.id and not r.has_climbed
+        ]
+        pathfinder.set_dynamic_obstacles(
+            [r.position for r in other_robots],
+            robot.config.width * 1.5,  # Larger bubble
+        )
+
+        result = pathfinder.find_path(robot.position, current_action.targetPosition)
+        pathfinder.clear_dynamic_obstacles()
+
+        if result.found and len(result.path) > 0:
+            robot.set_path(result.path)
+        else:
+            # Try again without dynamic obstacles
+            fallback_result = pathfinder.find_path(robot.position, current_action.targetPosition)
+            if fallback_result.found and len(fallback_result.path) > 0:
+                robot.set_path(fallback_result.path)
+            else:
+                # Can't find a path - give up
                 robot.complete_action()
 
     def _update_shooting_robot(self, robot: Robot, delta_time: float) -> None:

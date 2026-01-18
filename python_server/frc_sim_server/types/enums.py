@@ -57,3 +57,13 @@ class Alliance(str, Enum):
     """Alliance color."""
     RED = "red"
     BLUE = "blue"
+
+
+class EscapeStrategy(str, Enum):
+    """Escape strategies for stuck robots."""
+    REPATH = "REPATH"
+    PERPENDICULAR_LEFT = "PERPENDICULAR_LEFT"
+    PERPENDICULAR_RIGHT = "PERPENDICULAR_RIGHT"
+    BACKWARD = "BACKWARD"
+    RANDOM_DIRECTION = "RANDOM_DIRECTION"
+    ABANDON_TARGET = "ABANDON_TARGET"

@@ -8,7 +8,7 @@ import type { Field } from '../field/Field.js';
  * Configuration for stuck detection and handling
  */
 export interface StuckHandlerConfig {
-  /** Number of ticks with minimal movement to consider stuck (default: 20) */
+  /** Number of ticks with minimal movement to consider stuck (default: 120 = 2 seconds at 60 FPS) */
   stuckThreshold: number;
   /** Minimum movement in inches to not be considered stuck (default: 0.5) */
   minMovement: number;
@@ -16,11 +16,11 @@ export interface StuckHandlerConfig {
   positionHistorySize: number;
   /** Distance to scan for obstacles (default: 60 inches) */
   obstacleDetectionRange: number;
-  /** Number of ticks between repath attempts (default: 20) */
+  /** Number of ticks between repath attempts (default: 30 = 0.5 seconds) */
   repathInterval: number;
-  /** Number of ticks before trying smart backoff (default: 90) */
+  /** Number of ticks before trying smart backoff (default: 180 = 3 seconds) */
   smartBackoffThreshold: number;
-  /** Number of ticks before abandoning target (default: 300) */
+  /** Number of ticks before abandoning target (default: 360 = 6 seconds) */
   abandonThreshold: number;
   /** Backoff distance in inches (default: 40-80 random) */
   backoffDistanceMin: number;
@@ -28,13 +28,13 @@ export interface StuckHandlerConfig {
 }
 
 const DEFAULT_CONFIG: StuckHandlerConfig = {
-  stuckThreshold: 20,
+  stuckThreshold: 120, // 2 seconds at 60 FPS
   minMovement: 0.5,
   positionHistorySize: 10,
   obstacleDetectionRange: 60,
-  repathInterval: 20,
-  smartBackoffThreshold: 90,
-  abandonThreshold: 300,
+  repathInterval: 30, // Repath every 0.5 seconds when stuck
+  smartBackoffThreshold: 180, // 3 seconds: try smart backoff
+  abandonThreshold: 360, // 6 seconds: give up on target
   backoffDistanceMin: 40,
   backoffDistanceMax: 80,
 };
@@ -266,11 +266,11 @@ export class StuckHandler {
     const ticks = state.stuckTicks;
     const interval = this.config.repathInterval;
 
-    // Escalation timeline:
-    // 20 ticks: First repath
-    // 40, 60, 80 ticks: Additional repath attempts
-    // 90+ ticks: Smart backoff (obstacle-aware perpendicular escape)
-    // 300+ ticks: Abandon target
+    // Escalation timeline (at 60 FPS):
+    // 120 ticks (2 sec): First repath
+    // 150, 180 ticks: Additional repath attempts
+    // 180+ ticks (3 sec): Smart backoff (obstacle-aware perpendicular escape)
+    // 360+ ticks (6 sec): Abandon target
 
     if (ticks >= this.config.abandonThreshold) {
       // Give up entirely
