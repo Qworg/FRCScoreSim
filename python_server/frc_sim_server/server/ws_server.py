@@ -149,6 +149,20 @@ class WebSocketServer:
                 f"clients={len(self.clients)}, msg_size={len(message)} bytes"
             )
 
+        # On first tick, log a sample robot to debug serialization
+        if state.tick == 1 and state.robots:
+            import json
+            robot = state.robots[0]
+            logger.info(f"Sample robot data (tick 1):")
+            logger.info(f"  id={robot.id}, alliance={robot.alliance}")
+            logger.info(f"  position=({robot.position.x}, {robot.position.y})")
+            logger.info(f"  config present: {robot.config is not None}")
+            if robot.config:
+                logger.info(f"  config.width={robot.config.width}, config.length={robot.config.length}")
+            # Log first 500 chars of serialized message
+            msg_str = message.decode('utf-8')
+            logger.debug(f"Serialized message preview: {msg_str[:500]}...")
+
         # Fire and forget the broadcast
         asyncio.create_task(self._broadcast(message))
 

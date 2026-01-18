@@ -487,15 +487,32 @@
       switch (message.type) {
         case 'config':
           config = message.data;
+          console.log('Config received:', config);
           if (config && config.field) {
+            console.log(`  Field: ${config.field.width}x${config.field.height}`);
+            console.log(`  Robots: ${config.robots?.length || 0}`);
             canvas.width = config.field.width * SCALE;
             canvas.height = config.field.height * SCALE;
+          } else {
+            console.error('  Invalid config - missing field data');
           }
           render();
           break;
 
         case 'state':
           gameState = message.data;
+          // Log first state and then every 300 ticks
+          if (!window._lastLoggedTick || gameState.tick - window._lastLoggedTick >= 300) {
+            console.log(`State tick=${gameState.tick}: ${gameState.robots?.length || 0} robots, ${gameState.balls?.length || 0} balls, phase=${gameState.phase}`);
+            if (gameState.robots?.length > 0) {
+              const r = gameState.robots[0];
+              console.log(`  First robot: id=${r.id}, pos=(${r.position?.x?.toFixed(1)}, ${r.position?.y?.toFixed(1)}), config=${r.config ? 'present' : 'MISSING'}`);
+              if (r.config) {
+                console.log(`    config.width=${r.config.width}, config.length=${r.config.length}`);
+              }
+            }
+            window._lastLoggedTick = gameState.tick;
+          }
           updateUI();
           render();
           break;
@@ -565,23 +582,54 @@
 
     // Render the field
     function render() {
-      // Clear canvas
-      ctx.fillStyle = '#2d4a3e';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      try {
+        // Clear canvas
+        ctx.fillStyle = '#2d4a3e';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Draw field markings
-      drawFieldMarkings();
+        // Draw field markings
+        drawFieldMarkings();
 
-      // Draw scoring targets
-      if (config) {
-        drawScoringTargets();
-      }
+        // Draw scoring targets
+        if (config) {
+          drawScoringTargets();
+        }
 
-      // Draw game objects
-      if (gameState) {
-        drawPaths();  // Draw paths first (behind robots)
-        drawBalls();
-        drawRobots();
+        // Draw game objects
+        if (gameState) {
+          try {
+            drawPaths();  // Draw paths first (behind robots)
+          } catch (e) {
+            console.error('Error drawing paths:', e);
+          }
+          try {
+            drawBalls();
+          } catch (e) {
+            console.error('Error drawing balls:', e);
+          }
+          try {
+            drawRobots();
+          } catch (e) {
+            console.error('Error drawing robots:', e);
+          }
+
+          // Debug overlay
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+          ctx.font = '12px monospace';
+          ctx.textAlign = 'left';
+          ctx.fillText(`Robots: ${gameState.robots?.length || 0}, Balls: ${gameState.balls?.length || 0}, Tick: ${gameState.tick}`, 10, 20);
+          if (gameState.robots?.length > 0) {
+            const r = gameState.robots[0];
+            ctx.fillText(`R1: pos=(${r.position?.x?.toFixed(0)}, ${r.position?.y?.toFixed(0)}), cfg=${r.config ? 'OK' : 'MISSING'}`, 10, 35);
+          }
+        } else {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+          ctx.font = '14px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('Waiting for game state...', canvas.width / 2, canvas.height / 2);
+        }
+      } catch (e) {
+        console.error('Error in render:', e);
       }
     }
 
@@ -937,10 +985,20 @@
     // Draw robots
     function drawRobots() {
       for (const robot of gameState.robots) {
+        // Defensive checks
+        if (!robot.position) {
+          console.error(`Robot ${robot.id} missing position`);
+          continue;
+        }
+        if (!robot.config) {
+          console.error(`Robot ${robot.id} missing config`);
+          continue;
+        }
+
         const x = robot.position.x * SCALE;
         const y = canvas.height - robot.position.y * SCALE;
-        const width = robot.config.width * SCALE;
-        const length = robot.config.length * SCALE;
+        const width = (robot.config.width || 30) * SCALE;
+        const length = (robot.config.length || 30) * SCALE;
         const heading = -robot.heading * Math.PI / 180; // Convert to radians, flip for canvas
 
         ctx.save();

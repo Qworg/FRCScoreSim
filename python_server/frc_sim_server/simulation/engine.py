@@ -8,8 +8,6 @@ from typing import Optional, Callable, TYPE_CHECKING
 from dataclasses import dataclass
 
 from ..types.enums import MatchPhase, RobotActionType, BallState, ShiftParity
-
-logger = logging.getLogger(__name__)
 from ..types.schemas import (
     Position,
     FieldConfig,
@@ -39,6 +37,8 @@ from ..strategy.collector import CollectorStrategy
 from ..strategy.scorer import ScorerStrategy
 from .match import Match
 from .clock import GameClock
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
