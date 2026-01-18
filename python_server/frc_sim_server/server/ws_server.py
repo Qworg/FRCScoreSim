@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import asyncio
+import logging
 from typing import Optional, Callable, TYPE_CHECKING
 import msgspec
 import websockets
@@ -11,6 +12,8 @@ if TYPE_CHECKING:
     from ..simulation.engine import SimulationEngine
 
 from ..types.schemas import GameState, WSMessage, ConfigMessage
+
+logger = logging.getLogger(__name__)
 
 
 class WebSocketServer:
@@ -35,12 +38,13 @@ class WebSocketServer:
 
     async def start(self) -> None:
         """Start the WebSocket server."""
+        logger.info(f"Starting WebSocket server on port {self.port}...")
         self.server = await websockets.serve(
             self._handle_connection,
             "localhost",
             self.port,
         )
-        print(f"WebSocket server listening on port {self.port}")
+        logger.info(f"WebSocket server listening on ws://localhost:{self.port}")
 
     async def stop(self) -> None:
         """Stop the WebSocket server."""
@@ -53,28 +57,37 @@ class WebSocketServer:
     async def _handle_connection(self, websocket: WebSocketServerProtocol) -> None:
         """Handle a new WebSocket connection."""
         self.clients.add(websocket)
-        print(f"Client connected. Total clients: {len(self.clients)}")
+        logger.info(f"Client connected. Total clients: {len(self.clients)}")
 
         try:
             # Send current config if engine is attached
             if self.engine:
+                logger.debug("Sending config to new client...")
                 await self._send_config(websocket)
                 state = self.engine.get_state()
+                logger.debug(
+                    f"Sending initial state: tick={state.tick}, "
+                    f"robots={len(state.robots)}, balls={len(state.balls)}"
+                )
                 await self._send_state(websocket, state)
+                logger.debug("Initial state sent to client")
+            else:
+                logger.warning("No engine attached - client won't receive state")
 
             # Handle incoming messages
             async for message in websocket:
                 try:
                     data = self._decoder.decode(message)
+                    logger.debug(f"Received message: {data.get('type', 'unknown')}")
                     await self._handle_message(websocket, data)
                 except Exception as e:
-                    print(f"Invalid message received: {e}")
+                    logger.error(f"Invalid message received: {e}")
 
         except websockets.exceptions.ConnectionClosed:
-            pass
+            logger.debug("Client connection closed")
         finally:
             self.clients.discard(websocket)
-            print(f"Client disconnected. Total clients: {len(self.clients)}")
+            logger.info(f"Client disconnected. Total clients: {len(self.clients)}")
 
     async def _handle_message(
         self, websocket: WebSocketServerProtocol, message: dict
@@ -127,6 +140,14 @@ class WebSocketServer:
             "tick": state.tick,
             "data": state,
         })
+
+        # Log first broadcast and then every 300 ticks (5 seconds at 60 Hz)
+        if state.tick == 1 or state.tick % 300 == 0:
+            logger.debug(
+                f"Broadcasting state: tick={state.tick}, "
+                f"robots={len(state.robots)}, balls={len(state.balls)}, "
+                f"clients={len(self.clients)}, msg_size={len(message)} bytes"
+            )
 
         # Fire and forget the broadcast
         asyncio.create_task(self._broadcast(message))

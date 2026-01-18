@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 import asyncio
+import logging
 import time
 from typing import Optional, Callable, TYPE_CHECKING
 from dataclasses import dataclass
 
 from ..types.enums import MatchPhase, RobotActionType, BallState, ShiftParity
+
+logger = logging.getLogger(__name__)
 from ..types.schemas import (
     Position,
     FieldConfig,
@@ -58,13 +61,17 @@ class SimulationEngine:
         ball_physics: BallPhysicsConfig = DEFAULT_BALL_PHYSICS,
         tick_rate: int = 60,
     ):
+        logger.info("Initializing SimulationEngine...")
         self.tick_rate = tick_rate
         self.rules = rules
         self.ball_physics = ball_physics
 
         # Create match
+        logger.debug("Creating Match...")
         self.match = Match(field_config, rules, ball_physics)
+        logger.debug("Initializing balls from spawn points...")
         self.match.initialize_balls()
+        logger.info(f"  Balls initialized: {len(self.match.get_balls())} balls")
 
         # Initialize strategies
         self._strategies: dict[str, Strategy] = {
@@ -78,6 +85,7 @@ class SimulationEngine:
         self._pathfinders: dict[str, AStar] = {}
 
         # Initialize robots
+        logger.debug(f"Initializing {len(robot_setups)} robots...")
         self._initialize_robots(robot_setups)
         self._initialize_pathfinders()
 
@@ -85,11 +93,21 @@ class SimulationEngine:
         self._running = False
         self._state_callback: Optional[Callable[[GameState], None]] = None
 
+        # Log summary
+        logger.info(f"SimulationEngine initialized:")
+        logger.info(f"  Robots: {len(self.match.get_robots())}")
+        logger.info(f"  Balls: {len(self.match.get_balls())}")
+        logger.info(f"  Field: {field_config.width}x{field_config.height}")
+        logger.info(f"  Tick rate: {tick_rate} Hz")
+
     def _initialize_robots(self, setups: list[RobotSetup]) -> None:
         """Initialize robots from setup."""
         robots = []
         red_positions = self.match.field.get_starting_positions("red")
         blue_positions = self.match.field.get_starting_positions("blue")
+
+        logger.debug(f"  Red starting positions: {len(red_positions)}")
+        logger.debug(f"  Blue starting positions: {len(blue_positions)}")
 
         red_index = 0
         blue_index = 0
@@ -115,6 +133,8 @@ class SimulationEngine:
                 heading=heading,
             )
 
+            logger.debug(f"  Created robot {robot.id} at ({position.x:.1f}, {position.y:.1f})")
+
             # Give robot starting balls
             num_starting = min(setup.starting_balls, setup.config.ballCapacity)
             for _ in range(num_starting):
@@ -134,10 +154,12 @@ class SimulationEngine:
                 self.match.add_ball(ball)
                 robot.pick_up_ball(ball_id)
 
+            logger.debug(f"    Starting balls: {num_starting}")
             robots.append(robot)
             self._robot_strategies[robot.id] = setup.strategy
 
         self.match.initialize_robots(robots)
+        logger.info(f"  Robots initialized: {len(robots)} robots")
 
     def _initialize_pathfinders(self) -> None:
         """Initialize pathfinders for each robot size."""
@@ -183,14 +205,21 @@ class SimulationEngine:
 
     async def start(self) -> None:
         """Start the simulation in real-time mode."""
+        logger.info("Starting simulation...")
         self._running = True
         self.match.start()
+        logger.info(f"  Match started in phase: {self.match.clock.phase.value}")
+        logger.info(f"  Paused: {self.match.is_paused()}")
         await self._run_realtime()
 
     async def _run_realtime(self) -> None:
         """Run in real-time mode at 60 FPS."""
         tick_interval = 1.0 / self.tick_rate
         next_tick = time.perf_counter()
+        tick_count = 0
+        last_log_time = time.perf_counter()
+
+        logger.info("Entering real-time simulation loop...")
 
         while self._running and not self.match.is_finished():
             now = time.perf_counter()
@@ -198,10 +227,21 @@ class SimulationEngine:
             if now >= next_tick:
                 if not self.match.is_paused():
                     self.tick()
+                    tick_count += 1
 
                     # Broadcast state
                     if self._state_callback:
                         self._state_callback(self.match.get_state())
+
+                    # Log status every 5 seconds
+                    if now - last_log_time >= 5.0:
+                        logger.debug(
+                            f"Simulation running: tick={self.match.clock.tick}, "
+                            f"phase={self.match.clock.phase.value}, "
+                            f"robots={len(self.match.get_robots())}, "
+                            f"balls={len(self.match.get_balls())}"
+                        )
+                        last_log_time = now
 
                 next_tick += tick_interval
 
@@ -211,6 +251,8 @@ class SimulationEngine:
             else:
                 # Sleep for 90% of remaining time
                 await asyncio.sleep((next_tick - now) * 0.9)
+
+        logger.info(f"Simulation loop ended after {tick_count} ticks")
 
     def tick(self) -> None:
         """Perform a single simulation tick."""

@@ -1,9 +1,12 @@
 """HTTP server for serving static files."""
 
 from __future__ import annotations
+import logging
 import os
 from pathlib import Path
 from aiohttp import web
+
+logger = logging.getLogger(__name__)
 
 
 class HTTPServer:
@@ -33,6 +36,14 @@ class HTTPServer:
 
     async def start(self) -> None:
         """Start the HTTP server."""
+        logger.info(f"Starting HTTP server on port {self.port}...")
+        logger.debug(f"Public directory: {self.public_dir}")
+        logger.debug(f"  Exists: {self.public_dir.exists()}")
+
+        if self.public_dir.exists():
+            index_path = self.public_dir / "index.html"
+            logger.debug(f"  index.html exists: {index_path.exists()}")
+
         self.app = web.Application()
 
         # Add routes
@@ -45,8 +56,8 @@ class HTTPServer:
         self.site = web.TCPSite(self.runner, "localhost", self.port)
         await self.site.start()
 
-        print(f"HTTP server listening on http://localhost:{self.port}")
-        print(f"Serving files from: {self.public_dir}")
+        logger.info(f"HTTP server listening on http://localhost:{self.port}")
+        logger.info(f"Serving files from: {self.public_dir}")
 
     async def stop(self) -> None:
         """Stop the HTTP server."""

@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 import asyncio
+import logging
+import os
 import signal
 import sys
 from pathlib import Path
+
+# Configure logging based on environment variable
+log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, log_level, logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 # Try to use uvloop for better performance
 try:
     import uvloop
     uvloop.install()
-    print("Using uvloop for better async performance")
+    logger.info("Using uvloop for better async performance")
 except ImportError:
-    print("uvloop not available, using default event loop")
+    logger.info("uvloop not available, using default event loop")
 
 from .server.ws_server import WebSocketServer
 from .server.http_server import HTTPServer
@@ -91,18 +102,26 @@ async def run_server(
     field_path: str | Path | None = None,
 ) -> None:
     """Run the simulation server."""
-    print("Starting FRC Simulation Server...")
+    logger.info("=" * 60)
+    logger.info("Starting FRC Simulation Server...")
+    logger.info(f"Log level: {log_level}")
+    logger.info("=" * 60)
 
     # Load field configuration
     if field_path is None:
         field_path = find_default_field()
-    print(f"Loading field from: {field_path}")
+    logger.info(f"Loading field from: {field_path}")
     field_config = load_field_config(field_path)
 
     # Create default robots
+    logger.info("Creating default robots...")
     robot_setups = create_default_robots()
+    logger.info(f"  Created {len(robot_setups)} robot setups")
+    for setup in robot_setups:
+        logger.debug(f"    {setup.config.id}: {setup.alliance}, strategy={setup.strategy}, balls={setup.starting_balls}")
 
     # Create simulation engine
+    logger.info("Creating simulation engine...")
     engine = SimulationEngine(
         field_config=field_config,
         robot_setups=robot_setups,
@@ -111,6 +130,18 @@ async def run_server(
         tick_rate=60,
     )
 
+    # Log initial state summary
+    state = engine.get_state()
+    logger.info("Initial game state:")
+    logger.info(f"  Phase: {state.phase}")
+    logger.info(f"  Robots: {len(state.robots)}")
+    for r in state.robots:
+        logger.debug(f"    {r.id}: pos=({r.position.x:.1f}, {r.position.y:.1f}), balls={len(r.heldBalls)}")
+    logger.info(f"  Balls total: {len(state.balls)}")
+    on_field = sum(1 for b in state.balls if b.state == "ON_FIELD")
+    held = sum(1 for b in state.balls if b.state == "HELD")
+    logger.info(f"    On field: {on_field}, Held by robots: {held}")
+
     # Create servers
     http_server = HTTPServer(port=http_port)
     ws_server = WebSocketServer(port=ws_port)
@@ -118,16 +149,18 @@ async def run_server(
     # Connect engine to WebSocket server
     ws_server.attach_engine(engine)
     engine.on_state_update(ws_server.broadcast_state)
+    logger.debug("Engine connected to WebSocket server")
 
     # Handle control commands
     def handle_control(command: str) -> None:
+        logger.info(f"Control command received: {command}")
         if command == "play":
             engine.resume()
         elif command == "pause":
             engine.pause()
         elif command == "reset":
             # TODO: Implement reset
-            pass
+            logger.warning("Reset not implemented")
 
     ws_server.on_control(handle_control)
 
@@ -135,16 +168,22 @@ async def run_server(
     await http_server.start()
     await ws_server.start()
 
-    print(f"\nSimulation ready!")
-    print(f"  Open http://localhost:{http_port} in your browser")
-    print(f"  WebSocket server on port {ws_port}")
-    print(f"\nPress Ctrl+C to stop\n")
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("Simulation ready!")
+    logger.info(f"  Open http://localhost:{http_port} in your browser")
+    logger.info(f"  WebSocket server on port {ws_port}")
+    logger.info("")
+    logger.info("For verbose logging, set LOG_LEVEL=DEBUG:")
+    logger.info("  LOG_LEVEL=DEBUG python -m frc_sim_server")
+    logger.info("=" * 60)
+    logger.info("")
 
     # Set up shutdown handling
     shutdown_event = asyncio.Event()
 
     def signal_handler():
-        print("\nShutting down...")
+        logger.info("Shutdown signal received...")
         shutdown_event.set()
 
     loop = asyncio.get_running_loop()
@@ -156,6 +195,7 @@ async def run_server(
             pass
 
     # Start simulation
+    logger.info("Starting simulation task...")
     simulation_task = asyncio.create_task(engine.start())
 
     # Wait for shutdown signal
@@ -165,6 +205,7 @@ async def run_server(
         pass
 
     # Cleanup
+    logger.info("Stopping simulation...")
     engine.stop()
     simulation_task.cancel()
     try:
@@ -175,7 +216,7 @@ async def run_server(
     await ws_server.stop()
     await http_server.stop()
 
-    print("Server stopped.")
+    logger.info("Server stopped.")
 
 
 def main() -> None:
@@ -183,8 +224,11 @@ def main() -> None:
     try:
         asyncio.run(run_server())
     except KeyboardInterrupt:
-        print("\nInterrupted")
+        logger.info("Interrupted by user")
         sys.exit(0)
+    except Exception as e:
+        logger.exception(f"Fatal error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
