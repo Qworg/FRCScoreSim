@@ -5,51 +5,48 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Development Commands
 
 ```bash
-npm run build          # Compile TypeScript to dist/
-npm test               # Run vitest test suite
-npm run test:watch     # Run tests in watch mode
-npm run serve          # Start WebSocket server + browser UI at http://localhost:3000
-npm run demo           # Run headless simulation (fast, no UI)
-npm run dev            # Run with tsx watch (auto-recompile)
-```
-
-Run a specific test file:
-```bash
-npx vitest run test/field/Field.test.ts
+cd python_server
+uv run python -m frc_sim_server   # Start WebSocket server + browser UI at http://localhost:3000
 ```
 
 ## Architecture Overview
 
-This is an FRC (FIRST Robotics Competition) match simulator with ~60 FPS tick-based physics simulation.
+This is an FRC (FIRST Robotics Competition) match simulator with ~60 FPS tick-based physics simulation, implemented in Python.
 
 ### Core Loop (SimulationEngine)
-The `SimulationEngine` orchestrates the main tick loop:
+The `SimulationEngine` (`simulation/engine.py`) orchestrates the main tick loop:
 1. Strategy decisions are computed for each robot
 2. Robot physics updated (movement, collision)
 3. Ball physics updated (flight, ground friction, scoring detection)
 4. Events published to EventBus
-5. State broadcast to WebSocket clients (if real-time mode)
+5. State broadcast to WebSocket clients
 
 ### Key Subsystems
 
-**Game State** (`src/game/`):
-- `Match.ts` - Central game state holder (robots, balls, events)
-- `GameClock.ts` - Phase timing (AUTO → TRANSITION → 4 SHIFTs → ENDGAME)
-- `ScoringSystem.ts` - Point calculation and parity determination
+**Game State** (`simulation/`):
+- `match.py` - Central game state holder (robots, balls, events)
+- `clock.py` - Phase timing (AUTO → TRANSITION → 4 SHIFTs → ENDGAME)
+- `scoring.py` - Point calculation and parity determination
 
-**Strategy System** (`src/strategy/`):
+**Strategy System** (`strategy/`):
 - Strategies implement `BaseStrategy.decide(context)` returning `StrategyDecision`
 - `StrategyContext` provides game state, nearby balls, scoring targets, phase info
-- Key property: `canScore` - whether alliance can score in current phase (shift-based scoring)
-- Built-in: `IdleStrategy`, `CollectorStrategy`, `ScorerStrategy`, `AutoClimbStrategy`, `EndgameClimberStrategy`
+- Key property: `can_score` - whether alliance can score in current phase (shift-based scoring)
+- Built-in: `IdleStrategy`, `CollectorStrategy`, `ScorerStrategy`
 
-**Physics**:
-- Robot: velocity-based movement with acceleration limits, A* pathfinding (`src/robot/Movement.ts`)
-- Ball: gravity (386.4 in/s²), air resistance, ground friction (`src/ball/BallPhysics.ts`)
+**Physics** (`physics/`):
+- `robot.py` - velocity-based movement with acceleration limits
+- `ball.py` - gravity (386.4 in/s²), air resistance, ground friction
+- `collision.py` - collision detection and response
 
-**Field** (`src/field/`):
-- 648×324 inch grid (standard FRC field)
+**Field** (`field/`):
+- `field.py` - 648×324 inch grid (standard FRC field)
+- `pathfinding.py` - A* pathfinding algorithm
 - Zone types: NORMAL, RAMP (speed penalty), TRENCH (height check), CLIMBING, SCORING_ZONE
+
+**Entities** (`entities/`):
+- `robot.py` - Robot state and configuration
+- `ball.py` - Ball state management
 
 ### Shift-Based Scoring (Unique Game Mechanic)
 Alliances get EVEN or ODD parity based on AUTO scoring. During teleop shifts:
@@ -59,8 +56,17 @@ Alliances get EVEN or ODD parity based on AUTO scoring. During teleop shifts:
 
 ### Data Formats
 - Fields: JSON in `data/fields/`
-- Robots: Markdown in `data/robots/` (parsed by `MarkdownParser.ts`)
+- Robots: Markdown in `data/robots/`
 
-### Event-Driven Communication
-`EventBus` (pub/sub) handles: `tick`, `ball_scored`, `ball_picked_up`, `ball_shot`, `phase_change`
-`VisualizationServer` broadcasts state via WebSocket on port 8080.
+### Server Architecture
+- HTTP server on port 3000 serves the browser UI (`public/index.html`)
+- WebSocket server on port 8080 broadcasts game state to connected clients
+- Uses `asyncio` for async event loops
+- Uses `msgspec` for fast JSON encoding
+
+### Browser Visualization
+The `public/index.html` file contains the Canvas-based visualization:
+- Real-time rendering of field, robots, and balls
+- Control UI: Play, Pause, Step, Reset buttons
+- Keyboard shortcuts (Space=Play/Pause, Right=Step, Ctrl+R=Reset)
+- Status display (tick count, connection state, scores)
