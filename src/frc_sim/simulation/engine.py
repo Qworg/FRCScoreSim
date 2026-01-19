@@ -3,6 +3,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+import random
 import time
 from typing import Optional, Callable, TYPE_CHECKING
 from dataclasses import dataclass
@@ -66,6 +67,8 @@ class SimulationEngine:
         self.tick_rate = tick_rate
         self.rules = rules
         self.ball_physics = ball_physics
+        self._field_config = field_config
+        self._robot_setups = robot_setups
 
         # Create match
         logger.debug("Creating Match...")
@@ -347,13 +350,16 @@ class SimulationEngine:
 
         available_balls = [b.clone_data() for b in self.match.get_available_balls()]
 
-        # Find unclaimed balls
+        # Find unclaimed balls (or balls claimed by teammates for coordination)
+        # Also include balls with expired claims (claims expire after 180 ticks / 3 seconds)
         teammate_ids = {t.id for t in teammates}
+        current_tick = self.match.clock.tick
         unclaimed_balls = [
             b for b in available_balls
             if b.claimedByRobotId is None
             or b.claimedByRobotId == robot.id
-            or b.claimedByRobotId not in teammate_ids
+            or b.claimedByRobotId in teammate_ids
+            or (b.claimedAtTick is not None and current_tick - b.claimedAtTick > 180)
         ]
 
         scoring_targets = self.match.field.get_scoring_targets(robot.alliance)
@@ -423,6 +429,24 @@ class SimulationEngine:
             )
             break
 
+        # Find balls held by teammates
+        teammate_balls = [
+            b.clone_data() for b in self.match.balls
+            if b.held_by_robot_id in teammate_ids
+        ]
+
+        # Shot quality fields
+        is_good_shooting_position = self.match.field.is_good_shooting_position(robot.position)
+        is_on_own_side = self.match.field.is_on_alliance_side(robot.position, robot.alliance)
+        is_in_no_score_zone = self.match.field.is_in_no_score_zone(robot.position)
+
+        # Check for clear shot path if robot has a ball and there's a target
+        has_clear_shot_path = True
+        if robot.has_balls() and nearest_target:
+            has_clear_shot_path = self.match.field.has_clear_shot_path(
+                robot.position, nearest_target.position
+            )
+
         return StrategyContext(
             game_state=state,
             robot=robot.clone_state(),
@@ -431,7 +455,7 @@ class SimulationEngine:
             opponents=opponents,
             available_balls=available_balls,
             unclaimed_balls=unclaimed_balls,
-            teammate_balls=[],
+            teammate_balls=teammate_balls,
             scoring_targets=scoring_targets,
             nearest_ball_distance=nearest_ball_distance,
             nearest_ball=nearest_ball,
@@ -452,6 +476,10 @@ class SimulationEngine:
             alliance_endgame_climb_count=endgame_climb_count,
             is_near_climbing_zone=is_near_climbing,
             climbing_zone_position=climbing_zone_pos,
+            has_clear_shot_path=has_clear_shot_path,
+            is_good_shooting_position=is_good_shooting_position,
+            is_on_own_side=is_on_own_side,
+            is_in_no_score_zone=is_in_no_score_zone,
         )
 
     def _execute_decision(self, robot: Robot, decision: StrategyDecision) -> None:
@@ -579,12 +607,12 @@ class SimulationEngine:
             EscapeStrategy.RANDOM_DIRECTION,
         ):
             if escape_action.target_position:
-                self._escape_to_position(robot, escape_action.target_position)
+                self._escape_to_position(robot, escape_action.target_position, escape_action.strategy)
         elif escape_action.strategy == EscapeStrategy.ABANDON_TARGET:
             robot.complete_action()
             self._stuck_handler.clear_state(robot.id)
 
-    def _escape_to_position(self, robot: Robot, escape_position: Position) -> None:
+    def _escape_to_position(self, robot: Robot, escape_position: Position, strategy: EscapeStrategy) -> None:
         """Escape to a specific position, then continue to original target."""
         current_action = robot.current_action
         if current_action.type != RobotActionType.MOVING.value or not current_action.targetPosition:
@@ -606,7 +634,7 @@ class SimulationEngine:
         # If escape path failed, mark strategy as failed and try repath
         self._stuck_handler.mark_strategy_failed(
             robot.id,
-            EscapeStrategy.PERPENDICULAR_LEFT,  # Mark as generic perpendicular failure
+            strategy,  # Use actual strategy
         )
         self._repath_robot(robot)
 
@@ -670,7 +698,6 @@ class SimulationEngine:
                     )
 
                     # Apply accuracy - miss sometimes
-                    import random
                     if random.random() > robot.config.shootingAccuracy:
                         # Perturb velocity
                         ball.set_velocity(BallVelocity(
@@ -691,7 +718,7 @@ class SimulationEngine:
             if ball_id:
                 ball = self.match.get_ball(ball_id)
                 if ball and ball.is_available():
-                    if is_in_pickup_range(robot.position, ball.position, 24):
+                    if is_in_pickup_range(robot.position, ball.position, 18):
                         ball.pickup(robot.id, self.match.clock.tick)
                         robot.pick_up_ball(ball_id)
 
@@ -766,13 +793,8 @@ class SimulationEngine:
             if robot.is_idle():
                 # Find balls in range
                 for ball in self.match.get_available_balls():
-                    if is_in_pickup_range(robot.position, ball.position, 12):
+                    if is_in_pickup_range(robot.position, ball.position, 18):
                         ball.claim(robot.id, self.match.clock.tick)
-                        robot.start_action(
-                            robot.create_pickup_action(ball.id) if hasattr(robot, 'create_pickup_action')
-                            else create_idle_action(),
-                            self.match.clock.tick,
-                        )
                         # Start pickup action
                         from ..types.schemas import RobotAction
                         robot.current_action = RobotAction(
@@ -798,3 +820,33 @@ class SimulationEngine:
     def is_running(self) -> bool:
         """Check if simulation is running."""
         return self._running
+
+    def reset(self) -> None:
+        """Reset the simulation to initial state.
+
+        Resets the match clock to tick 0, respawns all balls to their initial
+        positions, resets all robot positions and states, clears stuck handler
+        state, and resets scores to 0.
+        """
+        logger.info("Resetting simulation...")
+
+        # Reset match state (clock, scoring, balls, events)
+        self.match.reset()
+
+        # Re-initialize balls from spawn points
+        self.match.initialize_balls()
+        logger.debug(f"  Balls re-initialized: {len(self.match.get_balls())} balls")
+
+        # Re-initialize robots from stored setups
+        self._robot_strategies.clear()
+        self._initialize_robots(self._robot_setups)
+        logger.debug(f"  Robots re-initialized: {len(self.match.get_robots())} robots")
+
+        # Clear stuck handler state
+        self._stuck_handler.clear()
+
+        # Broadcast the reset state
+        if self._state_callback:
+            self._state_callback(self.match.get_state())
+
+        logger.info("Simulation reset complete (paused)")

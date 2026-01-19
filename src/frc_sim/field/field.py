@@ -258,54 +258,6 @@ class Field:
             return pos.x < mid_x
         return pos.x >= mid_x
 
-    def has_clear_shot_path(
-        self, from_pos: Position, to_pos: Position, steps: int = 20
-    ) -> bool:
-        """Check if there's a clear shot path between two positions.
-
-        Shots from a robot's own third of the field are allowed to pass into
-        their scoring zone.
-        """
-        field_width = self.config.width
-        left_third_boundary = field_width / 3  # 216" for 648" field
-        right_third_boundary = (field_width * 2) / 3  # 432" for 648" field
-
-        # Determine which third the shot originates from
-        is_from_left_third = from_pos.x < left_third_boundary
-        is_from_right_third = from_pos.x > right_third_boundary
-
-        for i in range(1, steps):
-            t = i / steps
-            check_x = from_pos.x + (to_pos.x - from_pos.x) * t
-            check_y = from_pos.y + (to_pos.y - from_pos.y) * t
-            check_pos = Position(x=check_x, y=check_y)
-
-            zone = self.get_zone_at(check_pos)
-            if not self.is_in_bounds(check_pos):
-                return False
-
-            # Check for obstacles that block shots
-            if zone and zone.type == ZoneType.OBSTACLE.value:
-                return False
-
-            # Cells with blocksBalls modifier block shots that pass through them,
-            # UNLESS the shot originates from the proper third of the field
-            if zone and zone.modifiers and zone.modifiers.blocksBalls:
-                # Check if this blocking zone is on the left or right side
-                zone_is_on_left_side = check_x < field_width / 2
-
-                # Allow shots from left third through left blocking zone (red side)
-                # Allow shots from right third through right blocking zone (blue side)
-                is_allowed = (
-                    (is_from_left_third and zone_is_on_left_side)
-                    or (is_from_right_third and not zone_is_on_left_side)
-                )
-
-                if not is_allowed:
-                    return False
-
-        return True
-
     def is_good_shooting_position(self, pos: Position) -> bool:
         """Check if position is good for shooting.
 

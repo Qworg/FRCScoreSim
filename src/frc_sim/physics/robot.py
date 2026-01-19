@@ -124,7 +124,7 @@ def update_robot_movement(
     stopping_distance = _calculate_stopping_distance(new_velocity, robot.config.acceleration)
     if distance < stopping_distance * 1.5:
         decel = robot.config.acceleration * 1.5
-        new_velocity = max(10.0, new_velocity - decel * delta_time)
+        new_velocity = max(0.0, new_velocity - decel * delta_time)
 
     # Calculate displacement (forward_factor affects actual movement, not speed)
     displacement = new_velocity * forward_factor * delta_time
@@ -140,8 +140,14 @@ def update_robot_movement(
 
     # Clamp to field bounds
     margin = robot.config.width / 2
-    new_x = max(margin, min(field.width - margin, new_x))
-    new_y = max(margin, min(field.height - margin, new_y))
+    clamped_x = max(margin, min(field.width - margin, new_x))
+    clamped_y = max(margin, min(field.height - margin, new_y))
+
+    # Zero velocity if we hit a wall
+    if clamped_x != new_x or clamped_y != new_y:
+        new_velocity = 0.0
+
+    new_x, new_y = clamped_x, clamped_y
 
     new_pos = Position(x=new_x, y=new_y)
 
@@ -150,7 +156,8 @@ def update_robot_movement(
         (new_pos.x - robot.position.x) ** 2
         + (new_pos.y - robot.position.y) ** 2
     )
-    blocked = new_velocity > 1.0 and actual_move < 0.5
+    expected_move = new_velocity * delta_time
+    blocked = new_velocity > 1.0 and actual_move < expected_move * 0.1
 
     return MovementResult(
         position=new_pos,

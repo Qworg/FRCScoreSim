@@ -72,6 +72,11 @@ class Match:
         """Get a ball by ID."""
         return self._balls.get(ball_id)
 
+    @property
+    def balls(self) -> list[Ball]:
+        """Get all balls (property access)."""
+        return list(self._balls.values())
+
     def get_balls(self) -> list[Ball]:
         """Get all balls."""
         return list(self._balls.values())
@@ -209,3 +214,21 @@ class Match:
             events=list(self._events),
             paused=self._paused,
         )
+
+    def reset(self) -> None:
+        """Reset the match to initial state."""
+        # Reset clock
+        self.clock.reset()
+
+        # Reset scoring
+        self.scoring.reset()
+
+        # Clear balls and respawn queue
+        self._balls.clear()
+        self._respawn_queue.clear()
+
+        # Clear events
+        self._events.clear()
+
+        # Pause until explicitly resumed
+        self._paused = True

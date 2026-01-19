@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 class HTTPServer:
     """HTTP server for serving static files from public/ directory."""
 
-    def __init__(self, port: int = 3000, public_dir: str | Path | None = None):
+    def __init__(self, host: str = "0.0.0.0", port: int = 3000, public_dir: str | Path | None = None):
+        self.host = host
         self.port = port
         self.public_dir = Path(public_dir) if public_dir else self._find_public_dir()
         self.app: web.Application | None = None
@@ -53,10 +54,10 @@ class HTTPServer:
         self.runner = web.AppRunner(self.app)
         await self.runner.setup()
 
-        self.site = web.TCPSite(self.runner, "localhost", self.port)
+        self.site = web.TCPSite(self.runner, self.host, self.port)
         await self.site.start()
 
-        logger.info(f"HTTP server listening on http://localhost:{self.port}")
+        logger.info(f"HTTP server listening on http://{self.host}:{self.port}")
         logger.info(f"Serving files from: {self.public_dir}")
 
     async def stop(self) -> None:

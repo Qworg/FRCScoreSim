@@ -67,8 +67,8 @@ def _update_flight_physics(
     # Apply gravity to vertical velocity
     new_vz = vel.vz - config.gravity * delta_time
 
-    # Apply air resistance
-    resistance = config.airResistance ** delta_time
+    # Apply air resistance (normalized to per-tick at 60 FPS)
+    resistance = 1.0 - (1.0 - config.airResistance) * delta_time * 60
     new_vx = vel.vx * resistance
     new_vy = vel.vy * resistance
 
@@ -143,8 +143,8 @@ def _update_ground_physics(
         ball.set_velocity(BallVelocity(vx=0.0, vy=0.0, vz=0.0))
         return result
 
-    # Apply ground friction
-    friction = config.groundFriction ** delta_time
+    # Apply ground friction (normalized to per-tick at 60 FPS)
+    friction = 1.0 - (1.0 - config.groundFriction) * delta_time * 60
     new_vx = vel.vx * friction
     new_vy = vel.vy * friction
 

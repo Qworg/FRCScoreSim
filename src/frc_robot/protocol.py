@@ -49,9 +49,7 @@ class RobotAction(IntEnum):
     MOVING = 1
     PICKING_UP = 2
     SHOOTING = 3
-    PASSING = 4
-    CLIMBING = 5
-    DEFENDING = 6
+    CLIMBING = 4
 
 
 class BallState(IntEnum):

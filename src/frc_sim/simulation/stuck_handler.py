@@ -3,6 +3,7 @@
 from __future__ import annotations
 import math
 import random
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -66,7 +67,7 @@ class StuckState:
     last_escape_strategy: Optional[EscapeStrategy] = None
     failed_strategies: list[EscapeStrategy] = field(default_factory=list)
     nearby_obstacles: list[ObstacleInfo] = field(default_factory=list)
-    position_history: list[PositionRecord] = field(default_factory=list)
+    position_history: deque[PositionRecord] = field(default_factory=deque)
 
 
 @dataclass
@@ -132,6 +133,7 @@ class StuckHandler:
         return StuckState(
             robot_id=robot_id,
             stuck_since=tick,
+            position_history=deque(maxlen=self._config.position_history_size),
         )
 
     def _reset_state(self, state: StuckState, tick: int) -> None:
@@ -147,11 +149,8 @@ class StuckHandler:
         self, state: StuckState, position: Position, tick: int
     ) -> None:
         """Update position history."""
+        # deque with maxlen automatically discards oldest items when full
         state.position_history.append(PositionRecord(x=position.x, y=position.y, tick=tick))
-
-        # Keep only recent positions
-        if len(state.position_history) > self._config.position_history_size:
-            state.position_history.pop(0)
 
     def _calculate_movement(self, state: StuckState) -> float:
         """Calculate total movement over position history."""
@@ -453,14 +452,14 @@ class StuckHandler:
     def is_stuck(self, robot_id: str) -> bool:
         """Check if a robot is currently stuck."""
         state = self._states.get(robot_id)
-        return state is not None and state.stuck_ticks > self._config.stuck_threshold
+        return state is not None and state.stuck_ticks >= self._config.stuck_threshold
 
     def get_stuck_robots(self) -> list[str]:
         """Get all stuck robots."""
         return [
             robot_id
             for robot_id, state in self._states.items()
-            if state.stuck_ticks > self._config.stuck_threshold
+            if state.stuck_ticks >= self._config.stuck_threshold
         ]
 
     def clear_state(self, robot_id: str) -> None:

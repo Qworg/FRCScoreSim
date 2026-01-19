@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 import math
+import random
 
 from ..types.schemas import Position, BallVelocity, BallPhysicsConfig, DEFAULT_BALL_PHYSICS
 from ..entities.robot import Robot
 from ..entities.ball import Ball
 from ..field.field import Field
+
+# Collision threshold multiplier for robot-robot collisions.
+# Using the same value for detection and separation prevents hysteresis/oscillation.
+COLLISION_THRESHOLD = 0.85
 
 
 def are_robots_colliding(robot1: Robot, robot2: Robot) -> bool:
@@ -19,7 +24,7 @@ def are_robots_colliding(robot1: Robot, robot2: Robot) -> bool:
     r1 = math.sqrt(robot1.config.width ** 2 + robot1.config.length ** 2) / 2
     r2 = math.sqrt(robot2.config.width ** 2 + robot2.config.length ** 2) / 2
 
-    return distance < (r1 + r2) * 0.8  # 80% overlap threshold
+    return distance < (r1 + r2) * COLLISION_THRESHOLD
 
 
 def separate_robots(
@@ -44,7 +49,7 @@ def separate_robots(
     # Calculate minimum separation distance
     r1 = math.sqrt(robot1.config.width ** 2 + robot1.config.length ** 2) / 2
     r2 = math.sqrt(robot2.config.width ** 2 + robot2.config.length ** 2) / 2
-    min_dist = (r1 + r2) * 0.85
+    min_dist = (r1 + r2) * COLLISION_THRESHOLD
 
     # Calculate overlap
     overlap = min_dist - distance
@@ -192,7 +197,6 @@ def handle_ball_ball_collisions(
 
             elif distance == 0:
                 # Same position - push apart randomly
-                import random
                 angle = random.random() * math.pi * 2
                 offset = min_distance / 2 + 1
 

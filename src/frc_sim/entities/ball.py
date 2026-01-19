@@ -48,7 +48,7 @@ class Ball:
 
     def is_available(self) -> bool:
         """Check if ball is available for pickup."""
-        return self.state == BallState.ON_FIELD
+        return self.state == BallState.ON_FIELD and self.claimed_by_robot_id is None
 
     def is_held(self) -> bool:
         """Check if ball is held by a robot."""

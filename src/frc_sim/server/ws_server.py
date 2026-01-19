@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 class WebSocketServer:
     """WebSocket server for broadcasting simulation state to browser clients."""
 
-    def __init__(self, port: int = 8080):
+    def __init__(self, host: str = "0.0.0.0", port: int = 8080):
+        self.host = host
         self.port = port
         self.clients: set[WebSocketServerProtocol] = set()
         self.engine: Optional[SimulationEngine] = None
@@ -38,13 +39,13 @@ class WebSocketServer:
 
     async def start(self) -> None:
         """Start the WebSocket server."""
-        logger.info(f"Starting WebSocket server on port {self.port}...")
+        logger.info(f"Starting WebSocket server on {self.host}:{self.port}...")
         self.server = await websockets.serve(
             self._handle_connection,
-            "localhost",
+            self.host,
             self.port,
         )
-        logger.info(f"WebSocket server listening on ws://localhost:{self.port}")
+        logger.info(f"WebSocket server listening on ws://{self.host}:{self.port}")
 
     async def stop(self) -> None:
         """Stop the WebSocket server."""

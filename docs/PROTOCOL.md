@@ -227,9 +227,7 @@ Error codes:
 | 1 | MOVING | Moving to target position |
 | 2 | PICKING_UP | Picking up a ball |
 | 3 | SHOOTING | Shooting a ball |
-| 4 | PASSING | Passing to teammate |
-| 5 | CLIMBING | Climbing |
-| 6 | DEFENDING | Defending |
+| 4 | CLIMBING | Climbing |
 
 ### Ball State (uint8)
 

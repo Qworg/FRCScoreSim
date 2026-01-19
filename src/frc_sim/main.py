@@ -159,8 +159,7 @@ async def run_server(
         elif command == "pause":
             engine.pause()
         elif command == "reset":
-            # TODO: Implement reset
-            logger.warning("Reset not implemented")
+            engine.reset()
 
     ws_server.on_control(handle_control)
 

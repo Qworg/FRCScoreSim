@@ -31,9 +31,7 @@ class RobotActionType(str, Enum):
     MOVING = "MOVING"
     PICKING_UP = "PICKING_UP"
     SHOOTING = "SHOOTING"
-    PASSING = "PASSING"
     CLIMBING = "CLIMBING"
-    DEFENDING = "DEFENDING"
 
 
 class ZoneType(str, Enum):
