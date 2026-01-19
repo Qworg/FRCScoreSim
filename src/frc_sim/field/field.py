@@ -279,6 +279,16 @@ class Field:
 
         return True
 
+    def has_clear_shot_path(self, from_pos: Position, to_pos: Position) -> bool:
+        """Check if there's a clear shot path between two positions.
+
+        Currently returns True as we don't have obstacle detection for shots.
+        This could be extended to check for obstacles along the path.
+        """
+        # For now, assume all shots have a clear path
+        # A more sophisticated implementation could check for obstacles
+        return True
+
     def clamp_to_bounds(self, pos: Position, margin: float = 0.0) -> Position:
         """Clamp a position to be within field bounds."""
         return Position(

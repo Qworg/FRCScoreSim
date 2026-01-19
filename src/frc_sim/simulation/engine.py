@@ -36,6 +36,7 @@ from ..strategy.base import Strategy, StrategyContext, StrategyDecision
 from ..strategy.idle import IdleStrategy
 from ..strategy.collector import CollectorStrategy
 from ..strategy.scorer import ScorerStrategy
+from ..strategy.decision_tree import create_collector_strategy, create_scorer_strategy
 from .match import Match
 from .clock import GameClock
 from .stuck_handler import StuckHandler
@@ -82,6 +83,8 @@ class SimulationEngine:
             "idle": IdleStrategy(),
             "collector": CollectorStrategy(),
             "scorer": ScorerStrategy(),
+            "tree_collector": create_collector_strategy(),
+            "tree_scorer": create_scorer_strategy(),
         }
         self._robot_strategies: dict[str, str] = {}
 

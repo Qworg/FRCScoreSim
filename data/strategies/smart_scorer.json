@@ -1,0 +1,74 @@
+{
+  "id": "smart_scorer",
+  "root": {
+    "node_type": "sequence",
+    "children": [
+      {
+        "node_type": "conditional",
+        "condition": {
+          "type": "and",
+          "conditions": [
+            "has_balls",
+            "can_score",
+            "in_shooting_range",
+            {"type": "hopper_percent", "op": ">=", "threshold": 0.5}
+          ]
+        },
+        "action": {"type": "shoot", "priority": 10, "reason": "Optimal scoring position with full hopper"}
+      },
+      {
+        "node_type": "conditional",
+        "condition": {
+          "type": "and",
+          "conditions": ["can_auto_climb", "is_near_climbing_zone"]
+        },
+        "action": {"type": "climb", "is_auto": true, "priority": 9, "reason": "Auto climb opportunity"}
+      },
+      {
+        "node_type": "conditional",
+        "condition": {
+          "type": "and",
+          "conditions": ["has_balls", "can_score", "has_scoring_target"]
+        },
+        "action": {"type": "move_to_scoring_target", "priority": 8, "reason": "Moving to scoring position"}
+      },
+      {
+        "node_type": "conditional",
+        "condition": {
+          "type": "and",
+          "conditions": [
+            "has_capacity",
+            {"type": "not", "condition": "hopper_full"}
+          ]
+        },
+        "action": {"type": "move_to_ball", "priority": 6, "reason": "Collecting ball"}
+      },
+      {
+        "node_type": "conditional",
+        "condition": {
+          "type": "and",
+          "conditions": ["has_balls", {"type": "not", "condition": "can_score"}]
+        },
+        "action": {"type": "move_to_scoring_target", "priority": 4, "reason": "Positioning for next shift"}
+      },
+      {
+        "node_type": "if_then_else",
+        "condition": {
+          "type": "and",
+          "conditions": [
+            "is_endgame_phase",
+            "can_endgame_climb",
+            {"type": "phase_time_remaining", "op": ">", "seconds": 5.0}
+          ]
+        },
+        "then": {
+          "node_type": "if_then_else",
+          "condition": "is_near_climbing_zone",
+          "then": {"type": "climb", "priority": 10, "reason": "Endgame climb"},
+          "else": {"type": "move_to_climbing_zone", "priority": 9, "reason": "Moving to climb zone"}
+        }
+      },
+      {"type": "idle", "priority": 1, "reason": "No action available"}
+    ]
+  }
+}
