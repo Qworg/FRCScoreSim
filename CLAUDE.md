@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 uv run python -m frc_sim          # Start WebSocket server + browser UI at http://localhost:3000
 uv run python -m frc_robot --id red-1 --strategy collector  # Start robot client
+uv run pytest                     # Run tests (requires: uv pip install -e ".[dev]")
 ```
 
 ## Architecture Overview
@@ -17,11 +18,11 @@ This is an FRC (FIRST Robotics Competition) match simulator with ~60 FPS tick-ba
 ```
 FRCScoreSim/
 ├── src/
-│   ├── frc_sim/      # Main simulation package
-│   └── frc_robot/    # Robot client package
+│   ├── frc_sim/      # Main simulation server package
+│   └── frc_robot/    # Robot client package (separate process)
 ├── public/           # Web UI (index.html)
 ├── data/             # Configuration files (fields, robots)
-└── pyproject.toml    # Unified project config
+└── pyproject.toml    # Unified project config (uses uv + hatch)
 ```
 
 ### Core Loop (SimulationEngine)
@@ -38,12 +39,20 @@ The `SimulationEngine` (`src/frc_sim/simulation/engine.py`) orchestrates the mai
 - `match.py` - Central game state holder (robots, balls, events)
 - `clock.py` - Phase timing (AUTO → TRANSITION → 4 SHIFTs → ENDGAME)
 - `scoring.py` - Point calculation and parity determination
+- `stuck_handler.py` - Detects and handles stuck robots
 
 **Strategy System** (`src/frc_sim/strategy/`):
-- Strategies implement `BaseStrategy.decide(context)` returning `StrategyDecision`
+- Strategies implement `Strategy.decide(context)` returning `StrategyDecision`
 - `StrategyContext` provides game state, nearby balls, scoring targets, phase info
 - Key property: `can_score` - whether alliance can score in current phase (shift-based scoring)
-- Built-in: `IdleStrategy`, `CollectorStrategy`, `ScorerStrategy`
+- Built-in strategies: `IdleStrategy`, `CollectorStrategy`, `ScorerStrategy`
+- Decision tree framework: composable tree-based strategies (see below)
+
+**Decision Tree Framework** (`src/frc_sim/strategy/decision_tree/`):
+- Composable behavior trees for complex strategies
+- Node types: Conditions (`HasBalls`, `CanScore`, `InShootingRange`), Actions (`ShootAction`, `MoveToBallAction`), Selectors (`Sequence`, `Fallback`, `IfThenElse`)
+- Can load trees from JSON or build programmatically
+- Pre-built trees: `create_collector_strategy()`, `create_scorer_strategy()`
 
 **Physics** (`src/frc_sim/physics/`):
 - `robot.py` - velocity-based movement with acceleration limits
@@ -71,9 +80,17 @@ Alliances get EVEN or ODD parity based on AUTO scoring. During teleop shifts:
 
 ### Server Architecture
 - HTTP server on port 3000 serves the browser UI (`public/index.html`)
-- WebSocket server on port 8080 broadcasts game state to connected clients
+- WebSocket server on port 8080 broadcasts JSON game state to browser clients
+- WebSocket server on port 8081 uses MessagePack binary protocol for robot clients
 - Uses `asyncio` for async event loops
-- Uses `msgspec` for fast JSON encoding
+- Uses `msgspec` for fast JSON encoding, `msgpack` for binary protocol
+
+### Robot Client Architecture (`frc_robot`)
+The robot client runs as a separate process and connects to the simulation server:
+- `client.py` - `RobotClient` handles WebSocket connection, MessagePack serialization
+- `protocol.py` - Wire protocol types (`WorldState`, `RobotCommand`, `FieldConfig`)
+- `strategies/` - Client-side strategy implementations (separate from server strategies)
+- CLI: `--id red-1 --strategy collector --server ws://localhost:8081`
 
 ### Browser Visualization
 The `public/index.html` file contains the Canvas-based visualization:
